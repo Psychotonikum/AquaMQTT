@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <AsyncJson.h>
 #include <LittleFS.h>
+#include <WiFi.h>
 
 #include "config/WebConfig.h"
 #include "state/Optitronic2State.h"
@@ -445,8 +446,8 @@ void WebHandler::setup()
 
     // Device data endpoint (entity list for a device)
     mServer.on("/rest/deviceData", HTTP_GET, [](AsyncWebServerRequest* request) {
-        // Reuse dashboard data for now - clients will get the full tree
-        request->redirect("/rest/dashboardData");
+        // Return empty nodes array - devices page will show device info from coreData
+        request->send(200, "application/json", "{\"nodes\":[]}");
     });
 
     // Write device value (from dashboard edit dialog)
@@ -558,7 +559,463 @@ void WebHandler::setup()
     });
     mServer.addHandler(writeHandler);
 
-    // POST API: WiFi config
+    // ===== Stub REST endpoints for all EMS-ESP32 web UI pages =====
+
+    // Sensors page
+    mServer.on("/rest/sensorData", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json",
+            "{\"ts\":[],\"as\":[],\"analog_enabled\":false,\"available_gpios\":[],\"exclude_types\":[],\"platform\":\"ESP32-S3\"}");
+    });
+
+    // Activity page
+    mServer.on("/rest/activity", HTTP_GET, [](AsyncWebServerRequest* request) {
+        auto& state = aquamqtt::Optitronic2State::getInstance();
+        String json = "{\"stats\":[{\"id\":0,\"s\":";
+        json += modbusRelayTask.getFramesReceived();
+        json += ",\"f\":";
+        json += modbusRelayTask.getCrcErrors();
+        uint32_t total = modbusRelayTask.getFramesReceived() + modbusRelayTask.getCrcErrors();
+        uint16_t quality = total > 0 ? (uint16_t)(modbusRelayTask.getFramesReceived() * 100 / total) : 0;
+        json += ",\"q\":";
+        json += quality;
+        json += "}]}";
+        request->send(200, "application/json", json);
+    });
+
+    // Application Settings
+    mServer.on("/rest/settings", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json",
+            "{\"locale\":\"en\",\"tx_mode\":0,\"ems_bus_id\":0,"
+            "\"syslog_enabled\":false,\"syslog_level\":3,\"syslog_mark_interval\":0,"
+            "\"syslog_host\":\"\",\"syslog_port\":514,"
+            "\"boiler_heatingoff\":false,\"remote_timeout_en\":false,\"remote_timeout\":0,"
+            "\"shower_timer\":false,\"shower_alert\":false,"
+            "\"shower_alert_coldshot\":10,\"shower_alert_trigger\":7,\"shower_min_duration\":120,"
+            "\"rx_gpio\":0,\"tx_gpio\":0,\"telnet_enabled\":false,"
+            "\"dallas_gpio\":0,\"dallas_parasite\":false,"
+            "\"led_gpio\":0,\"led_type\":0,\"hide_led\":false,"
+            "\"low_clock\":false,\"notoken_api\":true,\"readonly_mode\":false,"
+            "\"analog_enabled\":false,\"pbutton_gpio\":0,\"trace_raw\":false,"
+            "\"board_profile\":\"S3\",\"bool_format\":1,\"bool_dashboard\":1,"
+            "\"enum_format\":1,\"fahrenheit\":false,"
+            "\"phy_type\":0,\"eth_power\":0,\"eth_phy_addr\":0,\"eth_clock_mode\":0,"
+            "\"platform\":\"ESP32-S3\","
+            "\"modbus_enabled\":true,\"modbus_port\":502,\"modbus_max_clients\":1,\"modbus_timeout\":2000,"
+            "\"developer_mode\":false}");
+    });
+
+    // Scheduler
+    mServer.on("/rest/schedule", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json", "{\"schedule\":[]}");
+    });
+
+    // Modules
+    mServer.on("/rest/modules", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json", "{\"modules\":[]}");
+    });
+
+    // Device entities (Customizations)
+    mServer.on("/rest/deviceEntities", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json", "[]");
+    });
+
+    // Custom entities
+    mServer.on("/rest/customEntities", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json", "{\"entities\":[]}");
+    });
+
+    // MQTT Status
+    mServer.on("/rest/mqttStatus", HTTP_GET, [](AsyncWebServerRequest* request) {
+        // Read MQTT config to report
+        String json = "{\"enabled\":true,\"connected\":true,\"client_id\":\"aquamqtt\","
+            "\"disconnect_reason\":0,\"mqtt_fails\":0,\"mqtt_queued\":0,\"connect_count\":1}";
+        request->send(200, "application/json", json);
+    });
+
+    // MQTT Settings
+    mServer.on("/rest/mqttSettings", HTTP_GET, [](AsyncWebServerRequest* request) {
+        // Read from config file
+        if (LittleFS.exists("/config/mqtt.json"))
+        {
+            File f = LittleFS.open("/config/mqtt.json", "r");
+            String cfg = f.readString();
+            f.close();
+
+            // Parse and map to EMS-ESP format
+            JsonDocument doc;
+            deserializeJson(doc, cfg);
+
+            String json = "{\"enabled\":true,\"host\":\"";
+            json += doc["server"].as<String>();
+            json += "\",\"port\":";
+            json += doc["port"] | 1883;
+            json += ",\"base\":\"aquamqtt\",\"username\":\"";
+            json += doc["user"].as<String>();
+            json += "\",\"password\":\"";
+            json += doc["password"].as<String>();
+            json += "\",\"client_id\":\"";
+            json += doc["clientId"].as<String>();
+            json += "\",\"keep_alive\":60,\"clean_session\":true,\"entity_format\":1,"
+                "\"publish_time_boiler\":10,\"publish_time_thermostat\":10,"
+                "\"publish_time_solar\":10,\"publish_time_mixer\":10,"
+                "\"publish_time_water\":10,\"publish_time_other\":10,"
+                "\"publish_time_sensor\":10,\"publish_time_heartbeat\":60,"
+                "\"mqtt_qos\":0,\"mqtt_retain\":false,"
+                "\"ha_enabled\":";
+            json += (doc["enableDiscovery"] | false) ? "true" : "false";
+            json += ",\"nested_format\":1,\"send_response\":false,"
+                "\"publish_single\":false,\"publish_single2cmd\":false,"
+                "\"discovery_prefix\":\"";
+            json += doc["discoveryPrefix"].as<String>();
+            json += "\",\"discovery_type\":0,\"ha_number_mode\":0}";
+            request->send(200, "application/json", json);
+        }
+        else
+        {
+            request->send(200, "application/json",
+                "{\"enabled\":true,\"host\":\"\",\"port\":1883,\"base\":\"aquamqtt\","
+                "\"username\":\"\",\"password\":\"\",\"client_id\":\"aquamqtt\","
+                "\"keep_alive\":60,\"clean_session\":true,\"entity_format\":1,"
+                "\"publish_time_boiler\":10,\"publish_time_thermostat\":10,"
+                "\"publish_time_solar\":10,\"publish_time_mixer\":10,"
+                "\"publish_time_water\":10,\"publish_time_other\":10,"
+                "\"publish_time_sensor\":10,\"publish_time_heartbeat\":60,"
+                "\"mqtt_qos\":0,\"mqtt_retain\":false,"
+                "\"ha_enabled\":false,\"nested_format\":1,\"send_response\":false,"
+                "\"publish_single\":false,\"publish_single2cmd\":false,"
+                "\"discovery_prefix\":\"homeassistant\",\"discovery_type\":0,\"ha_number_mode\":0}");
+        }
+    });
+
+    // Network Status
+    mServer.on("/rest/networkStatus", HTTP_GET, [](AsyncWebServerRequest* request) {
+        String json = "{\"status\":3,\"local_ip\":\"";
+        json += WiFi.localIP().toString();
+        json += "\",\"local_ipv6\":\"::\",\"mac_address\":\"";
+        json += WiFi.macAddress();
+        json += "\",\"rssi\":";
+        json += WiFi.RSSI();
+        json += ",\"ssid\":\"";
+        json += WiFi.SSID();
+        json += "\",\"bssid\":\"";
+        json += WiFi.BSSIDstr();
+        json += "\",\"channel\":";
+        json += WiFi.channel();
+        json += ",\"subnet_mask\":\"";
+        json += WiFi.subnetMask().toString();
+        json += "\",\"gateway_ip\":\"";
+        json += WiFi.gatewayIP().toString();
+        json += "\",\"dns_ip_1\":\"";
+        json += WiFi.dnsIP(0).toString();
+        json += "\",\"dns_ip_2\":\"";
+        json += WiFi.dnsIP(1).toString();
+        json += "\",\"hostname\":\"aquamqtt\",\"reconnect_count\":0}";
+        request->send(200, "application/json", json);
+    });
+
+    // Network Settings
+    mServer.on("/rest/networkSettings", HTTP_GET, [](AsyncWebServerRequest* request) {
+        if (LittleFS.exists("/config/wifi.json"))
+        {
+            File f = LittleFS.open("/config/wifi.json", "r");
+            String cfg = f.readString();
+            f.close();
+
+            JsonDocument doc;
+            deserializeJson(doc, cfg);
+
+            String json = "{\"ssid\":\"";
+            json += doc["ssid"].as<String>();
+            json += "\",\"bssid\":\"\",\"password\":\"";
+            json += doc["password"].as<String>();
+            json += "\",\"hostname\":\"";
+            json += doc["networkName"] | "aquamqtt";
+            json += "\",\"static_ip_config\":false,"
+                "\"bandwidth20\":false,\"nosleep\":false,\"tx_power\":20,"
+                "\"enableMDNS\":true,\"enableCORS\":false,\"CORSOrigin\":\"\"}";
+            request->send(200, "application/json", json);
+        }
+        else
+        {
+            request->send(200, "application/json",
+                "{\"ssid\":\"\",\"bssid\":\"\",\"password\":\"\",\"hostname\":\"aquamqtt\","
+                "\"static_ip_config\":false,\"bandwidth20\":false,\"nosleep\":false,"
+                "\"tx_power\":20,\"enableMDNS\":true,\"enableCORS\":false,\"CORSOrigin\":\"\"}");
+        }
+    });
+
+    // NTP Status
+    mServer.on("/rest/ntpStatus", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json",
+            "{\"status\":0,\"utc_time\":\"\",\"local_time\":\"Not configured\",\"server\":\"pool.ntp.org\"}");
+    });
+
+    // NTP Settings
+    mServer.on("/rest/ntpSettings", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json",
+            "{\"enabled\":false,\"server\":\"pool.ntp.org\","
+            "\"tz_label\":\"Europe/Vienna\",\"tz_format\":\"CET-1CEST,M3.5.0,M10.5.0/3\"}");
+    });
+
+    // AP Status
+    mServer.on("/rest/apStatus", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json",
+            "{\"status\":0,\"ip_address\":\"192.168.4.1\",\"mac_address\":\"00:00:00:00:00:00\",\"station_num\":0}");
+    });
+
+    // AP Settings
+    mServer.on("/rest/apSettings", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json",
+            "{\"provision_mode\":0,\"ssid\":\"AquaMQTT\",\"password\":\"\","
+            "\"channel\":1,\"ssid_hidden\":false,\"max_clients\":4,"
+            "\"local_ip\":\"192.168.4.1\",\"gateway_ip\":\"192.168.4.1\",\"subnet_mask\":\"255.255.255.0\"}");
+    });
+
+    // Security Settings
+    mServer.on("/rest/securitySettings", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json",
+            "{\"users\":[{\"username\":\"admin\",\"password\":\"admin\",\"admin\":true}],\"jwt_secret\":\"aquamqtt-secret\"}");
+    });
+
+    // System Status (used by Hardware Status, Version, DownloadUpload)
+    mServer.on("/rest/systemStatus", HTTP_GET, [](AsyncWebServerRequest* request) {
+        String json = "{\"emsesp_version\":\"2.0.0-aquamqtt\",\"bus_status\":0,\"uptime\":";
+        json += (millis() / 1000);
+        json += ",\"bus_uptime\":";
+        json += (millis() / 1000);
+        json += ",\"num_devices\":1,\"num_sensors\":3,\"num_analogs\":0,"
+            "\"ntp_status\":0,\"ntp_time\":\"\","
+            "\"mqtt_status\":true,\"ap_status\":false,"
+            "\"network_status\":3,\"wifi_rssi\":";
+        json += WiFi.RSSI();
+        json += ",\"build_flags\":\"\",\"esp_platform\":\"ESP32-S3\","
+            "\"max_alloc_heap\":";
+        json += ESP.getMaxAllocHeap();
+        json += ",\"cpu_type\":\"ESP32-S3\",\"cpu_rev\":0,\"cpu_cores\":2,\"cpu_freq_mhz\":240,"
+            "\"free_heap\":";
+        json += ESP.getFreeHeap();
+        json += ",\"arduino_version\":\"3.x\",\"sdk_version\":\"5.x\","
+            "\"partition\":\"app0\",\"flash_chip_size\":";
+        json += ESP.getFlashChipSize();
+        json += ",\"flash_chip_speed\":";
+        json += ESP.getFlashChipSpeed();
+        json += ",\"app_used\":";
+        json += ESP.getSketchSize();
+        json += ",\"app_free\":";
+        json += ESP.getFreeSketchSpace();
+        json += ",\"fs_used\":";
+        json += LittleFS.usedBytes();
+        json += ",\"fs_free\":";
+        json += (LittleFS.totalBytes() - LittleFS.usedBytes());
+        json += ",\"free_mem\":";
+        json += ESP.getFreeHeap();
+        json += ",\"psram\":false,\"free_caps\":";
+        json += ESP.getMaxAllocHeap();
+        json += ",\"model\":\"AquaMQTT Optitronic 2\",\"board\":\"ESP32-S3-Nano\","
+            "\"has_loader\":false,\"has_partition\":false,"
+            "\"partitions\":[],\"status\":0,\"developer_mode\":false}";
+        request->send(200, "application/json", json);
+    });
+
+    // Log Settings
+    mServer.on("/rest/logSettings", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json",
+            "{\"level\":6,\"max_messages\":50,\"compact\":false,\"psram\":false,\"developer_mode\":false}");
+    });
+
+    // Features (used by various pages)
+    mServer.on("/rest/features", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json",
+            "{\"security\":true,\"mqtt\":true,\"ntp\":false,\"ota\":false,\"upload_firmware\":false}");
+    });
+
+    // Verify Authorization (always OK since no auth)
+    mServer.on("/rest/verifyAuthorization", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json", "{\"access_token\":\"aquamqtt-admin\"}");
+    });
+
+    // Sign In (always succeed)
+    mServer.on("/rest/signIn", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json", "{\"access_token\":\"aquamqtt-admin\"}");
+    });
+
+    // Board Profile
+    mServer.on("/rest/boardProfile", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json",
+            "{\"board\":\"S3\",\"led_gpio\":0,\"dallas_gpio\":0,\"rx_gpio\":0,\"tx_gpio\":0,"
+            "\"pbutton_gpio\":0,\"phy_type\":0,\"eth_power\":0,\"eth_phy_addr\":0,\"eth_clock_mode\":0}");
+    });
+
+    // WiFi scan
+    mServer.on("/rest/scanNetworks", HTTP_GET, [](AsyncWebServerRequest* request) {
+        WiFi.scanNetworks(true);
+        request->send(200, "application/json", "{\"status\":\"scanning\"}");
+    });
+
+    // WiFi scan results
+    mServer.on("/rest/listNetworks", HTTP_GET, [](AsyncWebServerRequest* request) {
+        int n = WiFi.scanComplete();
+        if (n < 0)
+        {
+            request->send(200, "application/json", "{\"networks\":[]}");
+            return;
+        }
+        String json = "{\"networks\":[";
+        for (int i = 0; i < n; i++)
+        {
+            if (i > 0) json += ",";
+            json += "{\"rssi\":";
+            json += WiFi.RSSI(i);
+            json += ",\"ssid\":\"";
+            json += WiFi.SSID(i);
+            json += "\",\"bssid\":\"";
+            json += WiFi.BSSIDstr(i);
+            json += "\",\"channel\":";
+            json += WiFi.channel(i);
+            json += ",\"encryption_type\":";
+            json += WiFi.encryptionType(i);
+            json += "}";
+        }
+        json += "]}";
+        WiFi.scanDelete();
+        request->send(200, "application/json", json);
+    });
+
+    // Generic POST stubs for pages that write settings
+    auto* settingsPostHandler = new AsyncCallbackJsonWebHandler("/rest/settings");
+    settingsPostHandler->setMethod(HTTP_POST);
+    settingsPostHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+    mServer.addHandler(settingsPostHandler);
+
+    auto* schedulePostHandler = new AsyncCallbackJsonWebHandler("/rest/schedule");
+    schedulePostHandler->setMethod(HTTP_POST);
+    schedulePostHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+    mServer.addHandler(schedulePostHandler);
+
+    auto* modulesPostHandler = new AsyncCallbackJsonWebHandler("/rest/modules");
+    modulesPostHandler->setMethod(HTTP_POST);
+    modulesPostHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+    mServer.addHandler(modulesPostHandler);
+
+    auto* mqttSettingsPostHandler = new AsyncCallbackJsonWebHandler("/rest/mqttSettings");
+    mqttSettingsPostHandler->setMethod(HTTP_POST);
+    mqttSettingsPostHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        // Save relevant fields to our mqtt config
+        JsonObject root = json.as<JsonObject>();
+        JsonDocument doc;
+        doc["server"] = root["host"] | "";
+        doc["port"] = root["port"] | 1883;
+        doc["user"] = root["username"] | "";
+        doc["password"] = root["password"] | "";
+        doc["clientId"] = root["client_id"] | "aquamqtt";
+        doc["enableDiscovery"] = root["ha_enabled"] | false;
+        doc["discoveryPrefix"] = root["discovery_prefix"] | "homeassistant";
+
+        String output;
+        serializeJson(doc, output);
+        WebHandler::saveConfigFile("mqtt", output);
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+    mServer.addHandler(mqttSettingsPostHandler);
+
+    auto* networkSettingsPostHandler = new AsyncCallbackJsonWebHandler("/rest/networkSettings");
+    networkSettingsPostHandler->setMethod(HTTP_POST);
+    networkSettingsPostHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        JsonObject root = json.as<JsonObject>();
+        JsonDocument doc;
+        doc["ssid"] = root["ssid"] | "";
+        doc["password"] = root["password"] | "";
+        doc["networkName"] = root["hostname"] | "aquamqtt";
+
+        String output;
+        serializeJson(doc, output);
+        WebHandler::saveConfigFile("wifi", output);
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+    mServer.addHandler(networkSettingsPostHandler);
+
+    auto* ntpSettingsPostHandler = new AsyncCallbackJsonWebHandler("/rest/ntpSettings");
+    ntpSettingsPostHandler->setMethod(HTTP_POST);
+    ntpSettingsPostHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+    mServer.addHandler(ntpSettingsPostHandler);
+
+    auto* apSettingsPostHandler = new AsyncCallbackJsonWebHandler("/rest/apSettings");
+    apSettingsPostHandler->setMethod(HTTP_POST);
+    apSettingsPostHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+    mServer.addHandler(apSettingsPostHandler);
+
+    auto* securitySettingsPostHandler = new AsyncCallbackJsonWebHandler("/rest/securitySettings");
+    securitySettingsPostHandler->setMethod(HTTP_POST);
+    securitySettingsPostHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+    mServer.addHandler(securitySettingsPostHandler);
+
+    auto* logSettingsPostHandler = new AsyncCallbackJsonWebHandler("/rest/logSettings");
+    logSettingsPostHandler->setMethod(HTTP_POST);
+    logSettingsPostHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+    mServer.addHandler(logSettingsPostHandler);
+
+    auto* actionPostHandler = new AsyncCallbackJsonWebHandler("/rest/action");
+    actionPostHandler->setMethod(HTTP_POST);
+    actionPostHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+    mServer.addHandler(actionPostHandler);
+
+    auto* apiPostHandler = new AsyncCallbackJsonWebHandler("/api");
+    apiPostHandler->setMethod(HTTP_POST);
+    apiPostHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+    mServer.addHandler(apiPostHandler);
+
+    auto* signInPostHandler = new AsyncCallbackJsonWebHandler("/rest/signIn");
+    signInPostHandler->setMethod(HTTP_POST);
+    signInPostHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        request->send(200, "application/json", "{\"access_token\":\"aquamqtt-admin\"}");
+    });
+    mServer.addHandler(signInPostHandler);
+
+    auto* customEntitiesPostHandler = new AsyncCallbackJsonWebHandler("/rest/customEntities");
+    customEntitiesPostHandler->setMethod(HTTP_POST);
+    customEntitiesPostHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+    mServer.addHandler(customEntitiesPostHandler);
+
+    auto* customizationEntitiesPostHandler = new AsyncCallbackJsonWebHandler("/rest/customizationEntities");
+    customizationEntitiesPostHandler->setMethod(HTTP_POST);
+    customizationEntitiesPostHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+    mServer.addHandler(customizationEntitiesPostHandler);
+
+    auto* resetCustomizationsPostHandler = new AsyncCallbackJsonWebHandler("/rest/resetCustomizations");
+    resetCustomizationsPostHandler->setMethod(HTTP_POST);
+    resetCustomizationsPostHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+    mServer.addHandler(resetCustomizationsPostHandler);
+
+    auto* writeDeviceNamePostHandler = new AsyncCallbackJsonWebHandler("/rest/writeDeviceName");
+    writeDeviceNamePostHandler->setMethod(HTTP_POST);
+    writeDeviceNamePostHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+    mServer.addHandler(writeDeviceNamePostHandler);
     auto* wifiHandler = new AsyncCallbackJsonWebHandler("/api/wifi");
     wifiHandler->setMethod(HTTP_POST);
     wifiHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {

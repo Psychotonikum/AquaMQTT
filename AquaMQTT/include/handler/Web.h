@@ -12,6 +12,7 @@ public:
     WebHandler();
     void setup();
     void loop();
+    static bool saveConfigFile(const String& filename, const String& content);
 
 private:
     static void handleRoot(AsyncWebServerRequest* request);
@@ -20,7 +21,6 @@ private:
     static void handleMqttGet(AsyncWebServerRequest* request);
     static void handleAquaGet(AsyncWebServerRequest* request);
     static void handleReboot(AsyncWebServerRequest* request);
-    static bool saveConfigFile(const String& filename, const String& content);
 
     static AsyncWebServer mServer;
 };
