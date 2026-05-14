@@ -8,18 +8,22 @@
 #include "task/ControllerTask.h"
 #include "task/HMITask.h"
 #include "task/ListenerTask.h"
+#include "task/ModbusListenerTask.h"
 #include "task/MQTTTask.h"
+#include "task/Optitronic2MQTTTask.h"
 
 using namespace aquamqtt;
 using namespace aquamqtt::config;
 
-HMITask        hmiTask;
-ControllerTask controllerTask;
-ListenerTask   listenerTask;
-MQTTTask       mqttTask;
-OTAHandler     otaHandler;
-RTCHandler     rtcHandler;
-WifiHandler    wifiHandler;
+HMITask              hmiTask;
+ControllerTask       controllerTask;
+ListenerTask         listenerTask;
+MQTTTask             mqttTask;
+ModbusListenerTask   modbusListenerTask;
+Optitronic2MQTTTask  optitronic2MqttTask;
+OTAHandler           otaHandler;
+RTCHandler           rtcHandler;
+WifiHandler          wifiHandler;
 
 esp_task_wdt_config_t twdt_config = {
     .timeout_ms     = WATCHDOG_TIMEOUT_MS,
@@ -71,7 +75,7 @@ void setup()
     }
     // if man-in-the-middle mode is set in configuration, there are two physical One-Wire USART instances
     // and AquaMQTT forwards (modified) messages from one to another
-    else
+    else if (OPERATION_MODE == MITM)
     {
         // reads 194 message from the hmi controller, writes 193, 67 and 74 to the hmi controller
         hmiTask.spawn();
@@ -79,7 +83,20 @@ void setup()
         // reads 193, 67 and 74 from the main controller, writes 194 to the main controller
         controllerTask.spawn();
     }
+    // Optitronic 2 Modbus RTU listener mode
+    else if (OPERATION_MODE == OPTITRONIC2_LISTENER)
+    {
+        // passively sniffs Modbus RTU bus, parses register values
+        modbusListenerTask.spawn();
+
+        // publishes register data to MQTT with HA discovery, handles commands
+        optitronic2MqttTask.spawn();
+    }
 
     // provide the message information via mqtt and enables overrides via mqtt
-    mqttTask.spawn();
+    // (only for Atlantic protocol modes)
+    if (OPERATION_MODE == LISTENER || OPERATION_MODE == MITM)
+    {
+        mqttTask.spawn();
+    }
 }

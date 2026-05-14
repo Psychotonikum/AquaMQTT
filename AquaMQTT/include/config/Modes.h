@@ -20,6 +20,17 @@ enum EOperationMode
      * - Parses and publishes DHW messages to MQTT, Allows modification via MQTT
      */
     MITM,
+
+    /**
+     * Optitronic 2 Modbus RTU Listener mode:
+     * - Passively sniffs the Modbus RTU bus between HMI and main controller
+     * - Parses read responses and write commands to extract register values
+     * - Publishes decoded register data to MQTT with HA discovery
+     * - Accepts MQTT commands and injects Modbus writes during bus idle periods
+     * - Protocol: Standard Modbus RTU, 57600 8N1, slave 0x01
+     * - Compatible with: Austria Email WPA 450 ECO and similar Optitronic 2 devices
+     */
+    OPTITRONIC2_LISTENER,
 };
 }
 
