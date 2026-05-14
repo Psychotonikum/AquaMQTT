@@ -31,6 +31,17 @@ enum EOperationMode
      * - Compatible with: Austria Email WPA 450 ECO and similar Optitronic 2 devices
      */
     OPTITRONIC2_LISTENER,
+
+    /**
+     * Optitronic 2 Modbus RTU MITM (Man-In-The-Middle) mode:
+     * - Passthrough jumper REMOVED — ESP32 actively relays between HMI and Main
+     * - Receives frames from HMI (Serial1) and forwards to Main (Serial2)
+     * - Receives frames from Main (Serial2) and forwards to HMI (Serial1)
+     * - Parses all traffic for state extraction and MQTT publishing
+     * - Injects MQTT-commanded writes during bus idle periods
+     * - Protocol: Standard Modbus RTU, 57600 8N1, slave 0x01
+     */
+    OPTITRONIC2_MITM,
 };
 }
 

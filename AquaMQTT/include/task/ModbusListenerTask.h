@@ -51,6 +51,8 @@ private:
     // Statistics
     uint32_t mFramesReceived;
     uint32_t mCrcErrors;
+    uint32_t mRawBytesReceived;
+    uint32_t mRawBytesHmi;
     uint32_t mLastStatsUpdate;
 };
 

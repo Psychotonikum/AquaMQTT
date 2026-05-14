@@ -6,6 +6,7 @@
 
 #include "Version.h"
 #include "config/Configuration.h"
+#include "config/WebConfig.h"
 #include "message/optitronic2/RegisterMap.h"
 #include "state/Optitronic2State.h"
 
@@ -59,6 +60,15 @@ constexpr char CTRL_FORCE_HEAT[]    = "ctrl/forceHeating";
 constexpr char CTRL_QUICK_HEAT[]    = "ctrl/quickHeat";
 constexpr char CTRL_ANTI_LEGIO[]    = "ctrl/triggerAntiLegionella";
 constexpr char CTRL_RESET[]         = "ctrl/reset";
+constexpr char CTRL_ECO_DEV[]       = "ctrl/ecoDeviation";
+constexpr char CTRL_KOMF_DEV[]      = "ctrl/komfortDeviation";
+constexpr char CTRL_AUX_HEAT[]      = "ctrl/auxHeatMode";
+constexpr char CTRL_PV_TARGET[]     = "ctrl/pvTargetSetpoint";
+constexpr char CTRL_ANTI_LEGIO_INT[]= "ctrl/antiLegionellaInterval";
+constexpr char CTRL_FROST_PROT[]    = "ctrl/frostProtectTemp";
+constexpr char CTRL_EXT_PRIORITY[]  = "ctrl/extSourcePriority";
+constexpr char CTRL_BIVALENT[]      = "ctrl/bivalentThreshold";
+constexpr char CTRL_EXT_MAX_TEMP[]  = "ctrl/extSourceMaxTemp";
 
 // Program enum strings
 constexpr char ENUM_PROGRAM_NORMAL[]       = "NORMAL";
@@ -86,6 +96,10 @@ constexpr char ENUM_STATE_UNKNOWN[]  = "UNKNOWN";
 constexpr char ENUM_AUX_ELECTRIC[] = "ELECTRIC";
 constexpr char ENUM_AUX_EXTERNAL[] = "EXTERNAL";
 constexpr char ENUM_AUX_BOTH[]     = "BOTH";
+
+// Ext source priority enum strings
+constexpr char ENUM_PRIORITY_DEVICE[]   = "DEVICE";
+constexpr char ENUM_PRIORITY_EXTERNAL[] = "EXTERNAL";
 
 // Last will
 constexpr char LWT_TOPIC[]   = "aquamqtt/status";
@@ -201,14 +215,14 @@ void Optitronic2MQTTTask::loop()
 
 void Optitronic2MQTTTask::connectMqtt()
 {
-    mMQTTClient.begin(config::brokerAddr, config::brokerPort, mWiFiClient);
+    mMQTTClient.begin(mqttConfig.server.c_str(), mqttConfig.port, mWiFiClient);
     mMQTTClient.onMessage([](const String& topic, const String& payload) { mqttMessageCallback(topic, payload); });
     mMQTTClient.setWill(o2mqtt::LWT_TOPIC, o2mqtt::LWT_OFFLINE, true, 1);
 
     if (mMQTTClient.connect(
-                config::brokerClientId,
-                strlen(config::brokerUser) == 0 ? nullptr : config::brokerUser,
-                strlen(config::brokerPassword) == 0 ? nullptr : config::brokerPassword))
+                mqttConfig.clientId.c_str(),
+                mqttConfig.user.length() == 0 ? nullptr : mqttConfig.user.c_str(),
+                mqttConfig.password.length() == 0 ? nullptr : mqttConfig.password.c_str()))
     {
         Serial.println("[o2mqtt] connected to broker");
 
@@ -380,7 +394,7 @@ void Optitronic2MQTTTask::publishStats()
 
 void Optitronic2MQTTTask::publishDiscovery()
 {
-    if (!config::ENABLE_HOMEASSISTANT_DISCOVERY_MODE)
+    if (!mqttConfig.enableDiscovery)
     {
         return;
     }
@@ -400,14 +414,14 @@ void Optitronic2MQTTTask::publishDiscovery()
 
         auto device        = doc["dev"].to<JsonObject>();
         device["ids"]      = "aquamqtt_optitronic2";
-        device["name"]     = config::heatpumpModelName;
+        device["name"]     = aquaMqttConfig.heatpumpModelName.c_str();
         device["mf"]       = "Austria Email";
         device["mdl"]      = "WPA 450 ECO (Optitronic 2)";
         device["sw"]       = String("AquaMQTT ") + aquamqtt::VERSION;
 
         char discoveryTopic[128];
         snprintf(discoveryTopic, sizeof(discoveryTopic), "%ssensor/aquamqtt_o2/%s/config",
-                 config::haDiscoveryPrefix, uniqueIdSuffix);
+                 mqttConfig.discoveryPrefix.c_str(), uniqueIdSuffix);
 
         char payload[512];
         serializeJson(doc, payload, sizeof(payload));
@@ -429,14 +443,14 @@ void Optitronic2MQTTTask::publishDiscovery()
 
         auto device        = doc["dev"].to<JsonObject>();
         device["ids"]      = "aquamqtt_optitronic2";
-        device["name"]     = config::heatpumpModelName;
+        device["name"]     = aquaMqttConfig.heatpumpModelName.c_str();
         device["mf"]       = "Austria Email";
         device["mdl"]      = "WPA 450 ECO (Optitronic 2)";
         device["sw"]       = String("AquaMQTT ") + aquamqtt::VERSION;
 
         char discoveryTopic[128];
         snprintf(discoveryTopic, sizeof(discoveryTopic), "%snumber/aquamqtt_o2/%s/config",
-                 config::haDiscoveryPrefix, uniqueIdSuffix);
+                 mqttConfig.discoveryPrefix.c_str(), uniqueIdSuffix);
 
         char payload[512];
         serializeJson(doc, payload, sizeof(payload));
@@ -459,14 +473,14 @@ void Optitronic2MQTTTask::publishDiscovery()
 
         auto device        = doc["dev"].to<JsonObject>();
         device["ids"]      = "aquamqtt_optitronic2";
-        device["name"]     = config::heatpumpModelName;
+        device["name"]     = aquaMqttConfig.heatpumpModelName.c_str();
         device["mf"]       = "Austria Email";
         device["mdl"]      = "WPA 450 ECO (Optitronic 2)";
         device["sw"]       = String("AquaMQTT ") + aquamqtt::VERSION;
 
         char discoveryTopic[128];
         snprintf(discoveryTopic, sizeof(discoveryTopic), "%sselect/aquamqtt_o2/%s/config",
-                 config::haDiscoveryPrefix, uniqueIdSuffix);
+                 mqttConfig.discoveryPrefix.c_str(), uniqueIdSuffix);
 
         char payload[512];
         serializeJson(doc, payload, sizeof(payload));
@@ -485,14 +499,14 @@ void Optitronic2MQTTTask::publishDiscovery()
 
         auto device        = doc["dev"].to<JsonObject>();
         device["ids"]      = "aquamqtt_optitronic2";
-        device["name"]     = config::heatpumpModelName;
+        device["name"]     = aquaMqttConfig.heatpumpModelName.c_str();
         device["mf"]       = "Austria Email";
         device["mdl"]      = "WPA 450 ECO (Optitronic 2)";
         device["sw"]       = String("AquaMQTT ") + aquamqtt::VERSION;
 
         char discoveryTopic[128];
         snprintf(discoveryTopic, sizeof(discoveryTopic), "%sswitch/aquamqtt_o2/%s/config",
-                 config::haDiscoveryPrefix, uniqueIdSuffix);
+                 mqttConfig.discoveryPrefix.c_str(), uniqueIdSuffix);
 
         char payload[512];
         serializeJson(doc, payload, sizeof(payload));
@@ -605,86 +619,102 @@ void Optitronic2MQTTTask::handleMessage(const String& topic, const String& paylo
             ESP.restart();
         }
     }
+    else if (topic.endsWith("ecoDeviation"))
+    {
+        float dev = payload.toFloat();
+        if (dev >= -15.0f && dev <= 0.0f)
+        {
+            queueWrite(REG_ECO_DEVIATION, tempToReg(dev));
+        }
+    }
+    else if (topic.endsWith("komfortDeviation"))
+    {
+        float dev = payload.toFloat();
+        if (dev >= 0.0f && dev <= 10.0f)
+        {
+            queueWrite(REG_KOMFORT_DEVIATION, tempToReg(dev));
+        }
+    }
+    else if (topic.endsWith("auxHeatMode"))
+    {
+        if (payload == o2mqtt::ENUM_AUX_ELECTRIC)
+            queueWrite(REG_AUX_HEAT_MODE, AUX_HEAT_ELECTRIC);
+        else if (payload == o2mqtt::ENUM_AUX_EXTERNAL)
+            queueWrite(REG_AUX_HEAT_MODE, AUX_HEAT_EXTERNAL);
+        else if (payload == o2mqtt::ENUM_AUX_BOTH)
+            queueWrite(REG_AUX_HEAT_MODE, AUX_HEAT_BOTH);
+    }
+    else if (topic.endsWith("pvTargetSetpoint"))
+    {
+        float temp = payload.toFloat();
+        if (temp >= 35.0f && temp <= 70.0f)
+        {
+            queueWrite(REG_PV_TARGET_SETPOINT, tempToReg(temp));
+        }
+    }
+    else if (topic.endsWith("antiLegionellaInterval"))
+    {
+        int days = payload.toInt();
+        if (days >= 0 && days <= 30)
+        {
+            queueWrite(REG_ANTI_LEGIO_INTERVAL, (uint16_t)days);
+        }
+    }
+    else if (topic.endsWith("frostProtectTemp"))
+    {
+        float temp = payload.toFloat();
+        if (temp >= 2.0f && temp <= 15.0f)
+        {
+            queueWrite(REG_FROST_PROTECT_TEMP, tempToReg(temp));
+        }
+    }
+    else if (topic.endsWith("extSourcePriority"))
+    {
+        if (payload == o2mqtt::ENUM_PRIORITY_DEVICE)
+            queueWrite(REG_EXT_SOURCE_PRIORITY, 0);
+        else if (payload == o2mqtt::ENUM_PRIORITY_EXTERNAL)
+            queueWrite(REG_EXT_SOURCE_PRIORITY, 1);
+    }
+    else if (topic.endsWith("bivalentThreshold"))
+    {
+        float temp = payload.toFloat();
+        if (temp >= -10.0f && temp <= 20.0f)
+        {
+            queueWrite(REG_BIVALENT_THRESHOLD, tempToReg(temp));
+        }
+    }
+    else if (topic.endsWith("extSourceMaxTemp"))
+    {
+        float temp = payload.toFloat();
+        if (temp >= 35.0f && temp <= 70.0f)
+        {
+            queueWrite(REG_EXT_SOURCE_MAX_TEMP, tempToReg(temp));
+        }
+    }
 }
 
 void Optitronic2MQTTTask::handleSetDhwSetpoint(float temp)
 {
-    uint16_t reg   = REG_DHW_SETPOINT;
-    uint16_t value = tempToReg(temp);
-
-    if (xSemaphoreTake(mWriteMutex, pdMS_TO_TICKS(100)))
-    {
-        for (auto& cmd : mWriteQueue)
-        {
-            if (!cmd.pending)
-            {
-                cmd.reg     = reg;
-                cmd.value   = value;
-                cmd.pending = true;
-                break;
-            }
-        }
-        xSemaphoreGive(mWriteMutex);
-    }
+    queueWrite(REG_DHW_SETPOINT, tempToReg(temp));
 }
 
 void Optitronic2MQTTTask::handleSetProgram(uint16_t program)
 {
-    if (xSemaphoreTake(mWriteMutex, pdMS_TO_TICKS(100)))
-    {
-        for (auto& cmd : mWriteQueue)
-        {
-            if (!cmd.pending)
-            {
-                cmd.reg     = REG_PROGRAM;
-                cmd.value   = program;
-                cmd.pending = true;
-                break;
-            }
-        }
-        xSemaphoreGive(mWriteMutex);
-    }
+    queueWrite(REG_PROGRAM, program);
 }
 
 void Optitronic2MQTTTask::handleSetExtInputFunction(uint16_t fn)
 {
-    if (xSemaphoreTake(mWriteMutex, pdMS_TO_TICKS(100)))
-    {
-        for (auto& cmd : mWriteQueue)
-        {
-            if (!cmd.pending)
-            {
-                cmd.reg     = REG_EXT_INPUT_FUNCTION;
-                cmd.value   = fn;
-                cmd.pending = true;
-                break;
-            }
-        }
-        xSemaphoreGive(mWriteMutex);
-    }
+    queueWrite(REG_EXT_INPUT_FUNCTION, fn);
 }
 
 void Optitronic2MQTTTask::handleSetForceHeating(bool enable)
 {
-    if (xSemaphoreTake(mWriteMutex, pdMS_TO_TICKS(100)))
-    {
-        for (auto& cmd : mWriteQueue)
-        {
-            if (!cmd.pending)
-            {
-                cmd.reg     = REG_FORCE_HEATING;
-                cmd.value   = enable ? 1 : 0;
-                cmd.pending = true;
-                break;
-            }
-        }
-        xSemaphoreGive(mWriteMutex);
-    }
+    queueWrite(REG_FORCE_HEATING, enable ? 1 : 0);
 }
 
 void Optitronic2MQTTTask::handleSetQuickHeat(bool activate, float target)
 {
-    // Get current quick heat register value for the target
     uint16_t currentReg = 0;
     Optitronic2State::getInstance().getRegister(REG_QUICK_HEAT_STATE, currentReg);
     uint16_t currentTarget = getQuickHeatTarget(currentReg);
@@ -697,26 +727,18 @@ void Optitronic2MQTTTask::handleSetQuickHeat(bool activate, float target)
     }
     else
     {
-        value = currentTarget;  // just the target without bit15
+        value = currentTarget;
     }
 
-    if (xSemaphoreTake(mWriteMutex, pdMS_TO_TICKS(100)))
-    {
-        for (auto& cmd : mWriteQueue)
-        {
-            if (!cmd.pending)
-            {
-                cmd.reg     = REG_QUICK_HEAT_STATE;
-                cmd.value   = value;
-                cmd.pending = true;
-                break;
-            }
-        }
-        xSemaphoreGive(mWriteMutex);
-    }
+    queueWrite(REG_QUICK_HEAT_STATE, value);
 }
 
 void Optitronic2MQTTTask::handleTriggerAntiLegionella()
+{
+    queueWrite(REG_ANTI_LEGIONELLA, 1);
+}
+
+void Optitronic2MQTTTask::queueWrite(uint16_t reg, uint16_t value)
 {
     if (xSemaphoreTake(mWriteMutex, pdMS_TO_TICKS(100)))
     {
@@ -724,8 +746,8 @@ void Optitronic2MQTTTask::handleTriggerAntiLegionella()
         {
             if (!cmd.pending)
             {
-                cmd.reg     = REG_ANTI_LEGIONELLA;
-                cmd.value   = 1;
+                cmd.reg     = reg;
+                cmd.value   = value;
                 cmd.pending = true;
                 break;
             }

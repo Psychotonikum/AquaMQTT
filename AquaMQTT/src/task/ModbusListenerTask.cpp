@@ -20,6 +20,8 @@ ModbusListenerTask::ModbusListenerTask()
     , mPendingReadQuantity(0)
     , mFramesReceived(0)
     , mCrcErrors(0)
+    , mRawBytesReceived(0)
+    , mRawBytesHmi(0)
     , mLastStatsUpdate(0)
 {
 }
@@ -73,6 +75,7 @@ void ModbusListenerTask::loop()
     while (Serial2.available())
     {
         uint8_t byte = Serial2.read();
+        mRawBytesReceived++;
         now          = millis();
 
         // If we were accumulating a frame and there was a gap, process the previous frame first

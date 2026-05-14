@@ -51,6 +51,7 @@ private:
     void handleSetForceHeating(bool enable);
     void handleSetQuickHeat(bool activate, float target);
     void handleTriggerAntiLegionella();
+    void queueWrite(uint16_t reg, uint16_t value);
 
     // Publish helper
     void publishFloat(const char* subtopic, float value, uint8_t decimals = 1);
