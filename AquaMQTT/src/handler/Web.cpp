@@ -5,9 +5,12 @@
 #include <LittleFS.h>
 
 #include "config/WebConfig.h"
+#include "state/Optitronic2State.h"
 #include "task/ModbusRelayTask.h"
+#include "task/Optitronic2MQTTTask.h"
 
 extern aquamqtt::ModbusRelayTask modbusRelayTask;
+extern aquamqtt::Optitronic2MQTTTask optitronic2MqttTask;
 
 namespace aquamqtt
 {
@@ -69,6 +72,98 @@ void WebHandler::setup()
 
         request->send(200, "application/json", json);
     });
+
+    // Register dump endpoint
+    mServer.on("/api/registers", HTTP_GET, [](AsyncWebServerRequest* request) {
+        auto& state = aquamqtt::Optitronic2State::getInstance();
+        String json = "{";
+        bool first = true;
+        uint16_t val;
+        for (uint16_t r = 0; r < 0x0321; r++)
+        {
+            if (state.getRegister(r, val))
+            {
+                if (!first) json += ",";
+                char key[12];
+                snprintf(key, sizeof(key), "\"0x%04X\"", r);
+                json += key;
+                json += ":";
+                json += val;
+                first = false;
+            }
+        }
+        json += "}";
+        request->send(200, "application/json", json);
+    });
+
+    // Structured status endpoint for web UI
+    mServer.on("/api/status", HTTP_GET, [](AsyncWebServerRequest* request) {
+        using namespace aquamqtt::message::optitronic2;
+        auto& state = aquamqtt::Optitronic2State::getInstance();
+        String json = "{";
+
+        // Sensors
+        json += "\"waterTemp\":"; json += String(state.getWaterTemp(), 1);
+        json += ",\"ambientTemp\":"; json += String(state.getAmbientTemp(), 1);
+        json += ",\"evaporatorTemp\":"; json += String(state.getEvaporatorTemp(), 1);
+
+        // State
+        json += ",\"operatingState\":"; json += state.getOperatingState();
+        json += ",\"heatSource\":"; json += state.getHeatSource();
+        json += ",\"activeSetpoint\":"; json += String(state.getActiveSetpoint(), 1);
+        json += ",\"quickHeatActive\":"; json += state.isQuickHeatActive() ? "true" : "false";
+        json += ",\"forceHeating\":"; json += state.isForceHeating() ? "true" : "false";
+        json += ",\"pvActive\":"; json += state.isPvActive() ? "true" : "false";
+
+        // Settings
+        json += ",\"dhwSetpoint\":"; json += String(state.getDhwSetpoint(), 1);
+        json += ",\"ecoDeviation\":"; json += String(state.getEcoDeviation(), 1);
+        json += ",\"komfortDeviation\":"; json += String(state.getKomfortDeviation(), 1);
+        json += ",\"program\":"; json += state.getProgram();
+        json += ",\"auxHeatMode\":"; json += state.getAuxHeatMode();
+        json += ",\"extInputFunction\":"; json += state.getExtInputFunction();
+
+        // Installer
+        if (state.hasBlock(REG_INSTALLER_BLK1_START))
+        {
+            json += ",\"frostProtectTemp\":"; json += String(state.getFrostProtectTemp(), 1);
+            json += ",\"antiLegioInterval\":"; json += state.getAntiLegioInterval();
+        }
+        if (state.hasBlock(REG_INSTALLER_BLK2_START))
+        {
+            json += ",\"bivalentThreshold\":"; json += String(state.getBivalentThreshold(), 1);
+            json += ",\"pvTargetSetpoint\":"; json += String(state.getPvTargetSetpoint(), 1);
+            json += ",\"extSourceMaxTemp\":"; json += String(state.getExtSourceMaxTemp(), 1);
+        }
+
+        // Diag
+        json += ",\"uptime\":"; json += millis();
+        json += ",\"framesReceived\":"; json += modbusRelayTask.getFramesReceived();
+        json += ",\"crcErrors\":"; json += modbusRelayTask.getCrcErrors();
+        json += ",\"writesInjected\":"; json += modbusRelayTask.getWritesInjected();
+
+        json += "}";
+        request->send(200, "application/json", json);
+    });
+
+    // POST API: Control (write register)
+    auto* ctrlHandler = new AsyncCallbackJsonWebHandler("/api/control");
+    ctrlHandler->setMethod(HTTP_POST);
+    ctrlHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        JsonObject root = json.as<JsonObject>();
+        uint16_t reg = root["reg"] | 0;
+        uint16_t value = root["value"] | 0;
+
+        if (reg == 0)
+        {
+            request->send(400, "application/json", "{\"error\":\"reg required\"}");
+            return;
+        }
+
+        optitronic2MqttTask.queueWrite(reg, value);
+        request->send(200, "application/json", "{\"status\":\"queued\"}");
+    });
+    mServer.addHandler(ctrlHandler);
 
     // POST API: WiFi config
     auto* wifiHandler = new AsyncCallbackJsonWebHandler("/api/wifi");

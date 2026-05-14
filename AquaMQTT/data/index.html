@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>AquaMQTT</title>
+<style>
+:root{--bg:#121212;--surface:#1e1e1e;--surface2:#2d2d2d;--primary:#90caf9;--primary-dark:#42a5f5;--secondary:#ce93d8;--text:#e0e0e0;--text2:#aaa;--success:#66bb6a;--warning:#ffa726;--error:#ef5350;--border:#333;--radius:8px;--shadow:0 2px 8px rgba(0,0,0,0.3)}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh}
+.sidebar{width:220px;background:var(--surface);border-right:1px solid var(--border);padding:16px 0;display:flex;flex-direction:column;position:fixed;height:100vh;overflow-y:auto}
+.sidebar .logo{padding:16px 20px;font-size:1.3em;font-weight:700;color:var(--primary);border-bottom:1px solid var(--border);margin-bottom:8px}
+.sidebar .logo span{font-size:0.65em;color:var(--text2);display:block;font-weight:400}
+.sidebar nav a{display:flex;align-items:center;gap:10px;padding:12px 20px;color:var(--text2);text-decoration:none;font-size:0.9em;transition:all 0.2s}
+.sidebar nav a:hover{background:var(--surface2);color:var(--text)}
+.sidebar nav a.active{background:var(--surface2);color:var(--primary);border-left:3px solid var(--primary)}
+.sidebar nav a svg{width:18px;height:18px;flex-shrink:0}
+.main{margin-left:220px;flex:1;padding:24px;min-height:100vh}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
+.header h1{font-size:1.4em;font-weight:600}
+.header .status{display:flex;align-items:center;gap:8px;font-size:0.85em;color:var(--text2)}
+.header .dot{width:8px;height:8px;border-radius:50%;background:var(--success)}
+.header .dot.err{background:var(--error)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow)}
+.card h2{font-size:0.95em;color:var(--primary);margin-bottom:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px}
+.card-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)}
+.card-row:last-child{border-bottom:none}
+.card-row .label{color:var(--text2);font-size:0.85em}
+.card-row .value{font-weight:600;font-size:0.95em}
+.card-row .value.highlight{color:var(--primary)}
+.card-row .value.warn{color:var(--warning)}
+.card-row .value.good{color:var(--success)}
+.card-row .value.bad{color:var(--error)}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:0.75em;font-weight:600}
+.badge-idle{background:#1b5e20;color:#a5d6a7}
+.badge-heating{background:#e65100;color:#ffcc80}
+.badge-pv{background:#1a237e;color:#9fa8da}
+.page{display:none}
+.page.active{display:block}
+.ctrl-group{margin-bottom:16px}
+.ctrl-group label{display:block;font-size:0.8em;color:var(--text2);margin-bottom:4px}
+.ctrl-group input,.ctrl-group select{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:0.9em}
+.ctrl-group input:focus,.ctrl-group select:focus{outline:none;border-color:var(--primary)}
+.btn{padding:8px 16px;border:none;border-radius:4px;cursor:pointer;font-size:0.85em;font-weight:600;transition:all 0.2s}
+.btn-primary{background:var(--primary-dark);color:#fff}
+.btn-primary:hover{background:var(--primary)}
+.btn-danger{background:var(--error);color:#fff}
+.btn-danger:hover{opacity:0.8}
+.btn-sm{padding:5px 10px;font-size:0.8em}
+.schedule-table{width:100%;border-collapse:collapse;font-size:0.85em}
+.schedule-table th,.schedule-table td{padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)}
+.schedule-table th{color:var(--primary);font-weight:600}
+.toast{position:fixed;bottom:20px;right:20px;padding:12px 20px;border-radius:var(--radius);color:#fff;font-size:0.85em;z-index:999;opacity:0;transition:opacity 0.3s}
+.toast.show{opacity:1}
+.toast.ok{background:#2e7d32}
+.toast.err{background:#c62828}
+@media(max-width:768px){
+.sidebar{width:60px}.sidebar .logo span,.sidebar nav a span{display:none}.sidebar .logo{padding:12px;font-size:1em;text-align:center}
+.sidebar nav a{padding:12px;justify-content:center}
+.main{margin-left:60px;padding:16px}
+.grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="sidebar">
+<div class="logo">AquaMQTT<span>Optitronic 2</span></div>
+<nav>
+<a href="#" data-page="dashboard" class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg><span>Dashboard</span></a>
+<a href="#" data-page="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15 1.65 1.65 0 003 14.08V14a2 2 0 014 0v.09"/></svg><span>Settings</span></a>
+<a href="#" data-page="installer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg><span>Installer</span></a>
+<a href="#" data-page="schedule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span>Schedule</span></a>
+<a href="#" data-page="diag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg><span>Diagnostics</span></a>
+<a href="#" data-page="config"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg><span>Config</span></a>
+</nav>
+</div>
+
+<div class="main">
+<!-- DASHBOARD -->
+<div class="page active" id="page-dashboard">
+<div class="header"><h1>Dashboard</h1><div class="status"><span class="dot" id="conn-dot"></span><span id="conn-text">Connecting...</span></div></div>
+<div class="grid">
+<div class="card">
+<h2>Temperatures</h2>
+<div class="card-row"><span class="label">Water Tank</span><span class="value highlight" id="d-water">--</span></div>
+<div class="card-row"><span class="label">Ambient / Supply Air</span><span class="value" id="d-ambient">--</span></div>
+<div class="card-row"><span class="label">Evaporator</span><span class="value" id="d-evap">--</span></div>
+<div class="card-row"><span class="label">Active Setpoint</span><span class="value" id="d-setpoint">--</span></div>
+</div>
+<div class="card">
+<h2>Operating State</h2>
+<div class="card-row"><span class="label">State</span><span class="value" id="d-state">--</span></div>
+<div class="card-row"><span class="label">Heat Source</span><span class="value" id="d-heatsrc">--</span></div>
+<div class="card-row"><span class="label">Program</span><span class="value" id="d-program">--</span></div>
+<div class="card-row"><span class="label">Force Heating</span><span class="value" id="d-force">--</span></div>
+<div class="card-row"><span class="label">PV Active</span><span class="value" id="d-pv">--</span></div>
+</div>
+<div class="card">
+<h2>Quick Actions</h2>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+<button class="btn btn-primary" onclick="sendCtrl(0x000F,1)">Force Heat ON</button>
+<button class="btn btn-danger" onclick="sendCtrl(0x000F,0)">Force Heat OFF</button>
+<button class="btn btn-primary btn-sm" onclick="sendCtrl(0x0010,1)">Anti-Legionella</button>
+</div>
+</div>
+<div class="card">
+<h2>System</h2>
+<div class="card-row"><span class="label">Uptime</span><span class="value" id="d-uptime">--</span></div>
+<div class="card-row"><span class="label">Frames Received</span><span class="value" id="d-frames">--</span></div>
+<div class="card-row"><span class="label">CRC Errors</span><span class="value" id="d-crc">--</span></div>
+<div class="card-row"><span class="label">Writes Injected</span><span class="value" id="d-writes">--</span></div>
+</div>
+</div>
+</div>
+
+<!-- SETTINGS -->
+<div class="page" id="page-settings">
+<div class="header"><h1>Settings</h1></div>
+<div class="grid">
+<div class="card">
+<h2>Temperature</h2>
+<div class="ctrl-group"><label>DHW Setpoint (°C)</label><input type="number" id="s-setpoint" min="35" max="70" step="0.5"></div>
+<button class="btn btn-primary" onclick="setTemp()">Apply</button>
+</div>
+<div class="card">
+<h2>Operation Mode</h2>
+<div class="ctrl-group"><label>Program</label><select id="s-program"><option value="1">NORMAL</option><option value="2">ECO</option><option value="3">KOMFORT</option><option value="4">KOMFORT+</option></select></div>
+<div class="ctrl-group"><label>Eco Deviation (°C)</label><input type="number" id="s-eco" min="-15" max="0" step="0.5"></div>
+<div class="ctrl-group"><label>Komfort Deviation (°C)</label><input type="number" id="s-komf" min="0" max="10" step="0.5"></div>
+<button class="btn btn-primary" onclick="setProgram()">Apply</button>
+</div>
+<div class="card">
+<h2>Auxiliary Heating</h2>
+<div class="ctrl-group"><label>Mode</label><select id="s-aux"><option value="1">Electric</option><option value="2">External</option><option value="3">Both</option></select></div>
+<button class="btn btn-primary" onclick="sendCtrl(0x000D,+document.getElementById('s-aux').value)">Apply</button>
+</div>
+<div class="card">
+<h2>External Input Function</h2>
+<div class="ctrl-group"><label>Function</label><select id="s-ext"><option value="0">Quick Heat</option><option value="1">Off</option><option value="2">Normal</option><option value="3">Eco</option><option value="4">Komfort</option><option value="5">Komfort+</option><option value="6">Photovoltaik</option></select></div>
+<button class="btn btn-primary" onclick="sendCtrl(0x0011,+document.getElementById('s-ext').value)">Apply</button>
+</div>
+</div>
+</div>
+
+<!-- INSTALLER -->
+<div class="page" id="page-installer">
+<div class="header"><h1>Installer Parameters</h1></div>
+<div class="grid">
+<div class="card">
+<h2>Protection</h2>
+<div class="card-row"><span class="label">Frost Protection Temp</span><span class="value" id="i-frost">--</span></div>
+<div class="card-row"><span class="label">Anti-Legionella Interval</span><span class="value" id="i-legio">--</span></div>
+</div>
+<div class="card">
+<h2>Heat Pump</h2>
+<div class="card-row"><span class="label">Bivalent Threshold</span><span class="value" id="i-bival">--</span></div>
+<div class="card-row"><span class="label">PV Target Setpoint</span><span class="value" id="i-pvtarget">--</span></div>
+<div class="card-row"><span class="label">Ext Source Max Temp</span><span class="value" id="i-extmax">--</span></div>
+</div>
+<div class="card">
+<h2>Installer Controls</h2>
+<div class="ctrl-group"><label>Frost Protect (°C)</label><input type="number" id="ic-frost" min="2" max="15" step="0.5"></div>
+<div class="ctrl-group"><label>Anti-Legio Interval (days, 0=off)</label><input type="number" id="ic-legio" min="0" max="30"></div>
+<div class="ctrl-group"><label>PV Target Setpoint (°C)</label><input type="number" id="ic-pv" min="35" max="70" step="0.5"></div>
+<div class="ctrl-group"><label>Bivalent Threshold (°C)</label><input type="number" id="ic-bival" min="-10" max="20" step="0.5"></div>
+<div class="ctrl-group"><label>Ext Source Max Temp (°C)</label><input type="number" id="ic-extmax" min="35" max="70" step="0.5"></div>
+<button class="btn btn-primary" onclick="setInstaller()">Apply All</button>
+</div>
+</div>
+</div>
+
+<!-- SCHEDULE -->
+<div class="page" id="page-schedule">
+<div class="header"><h1>Schedules</h1></div>
+<div class="grid">
+<div class="card" style="grid-column:1/-1">
+<h2>DHW Heating Schedule</h2>
+<table class="schedule-table"><thead><tr><th>Day</th><th>Window 1</th><th>Window 2</th><th>Window 3</th></tr></thead><tbody id="sched-dhw"></tbody></table>
+</div>
+<div class="card" style="grid-column:1/-1">
+<h2>Ventilation Schedule</h2>
+<table class="schedule-table"><thead><tr><th>Day</th><th>Window 1</th><th>Window 2</th><th>Window 3</th></tr></thead><tbody id="sched-vent"></tbody></table>
+</div>
+</div>
+</div>
+
+<!-- DIAGNOSTICS -->
+<div class="page" id="page-diag">
+<div class="header"><h1>Diagnostics</h1></div>
+<div class="grid">
+<div class="card">
+<h2>Bus Statistics</h2>
+<div id="diag-stats"></div>
+</div>
+<div class="card" style="grid-column:1/-1">
+<h2>Register Dump</h2>
+<div style="max-height:400px;overflow-y:auto;font-family:monospace;font-size:0.8em" id="reg-dump"></div>
+</div>
+</div>
+</div>
+
+<!-- CONFIG -->
+<div class="page" id="page-config">
+<div class="header"><h1>Configuration</h1></div>
+<div class="grid">
+<div class="card">
+<h2>WiFi</h2>
+<div class="ctrl-group"><label>SSID</label><input type="text" id="c-ssid"></div>
+<div class="ctrl-group"><label>Password</label><input type="password" id="c-pass"></div>
+<button class="btn btn-primary" onclick="saveWifi()">Save WiFi</button>
+</div>
+<div class="card">
+<h2>MQTT</h2>
+<div class="ctrl-group"><label>Broker Host</label><input type="text" id="c-mqtt-host"></div>
+<div class="ctrl-group"><label>Port</label><input type="number" id="c-mqtt-port" value="1883"></div>
+<div class="ctrl-group"><label>Username</label><input type="text" id="c-mqtt-user"></div>
+<div class="ctrl-group"><label>Password</label><input type="password" id="c-mqtt-pass"></div>
+<div class="ctrl-group"><label>Base Topic</label><input type="text" id="c-mqtt-topic" value="aquamqtt"></div>
+<button class="btn btn-primary" onclick="saveMqtt()">Save MQTT</button>
+</div>
+<div class="card">
+<h2>System</h2>
+<button class="btn btn-danger" onclick="if(confirm('Reboot device?'))location.href='/reboot'">Reboot</button>
+</div>
+</div>
+</div>
+
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const PROGRAMS=['','NORMAL','ECO','KOMFORT','KOMFORT+'];
+const HEAT_SRC=['OFF','ELECTRIC','HEATPUMP','BOTH'];
+const STATES={2:'IDLE',3:'HEATING',6:'PV_BOOST'};
+const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+// Navigation
+document.querySelectorAll('.sidebar nav a').forEach(a=>{
+a.addEventListener('click',e=>{
+e.preventDefault();
+document.querySelectorAll('.sidebar nav a').forEach(x=>x.classList.remove('active'));
+document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
+a.classList.add('active');
+document.getElementById('page-'+a.dataset.page).classList.add('active');
+if(a.dataset.page==='diag')loadDiag();
+if(a.dataset.page==='schedule')loadSchedule();
+if(a.dataset.page==='config')loadConfig();
+});
+});
+
+// Toast
+function toast(msg,ok){
+const t=document.getElementById('toast');
+t.textContent=msg;t.className='toast show '+(ok?'ok':'err');
+setTimeout(()=>t.classList.remove('show'),3000);
+}
+
+// API
+async function api(url,opts){
+try{const r=await fetch(url,opts);return await r.json();}
+catch(e){return null;}
+}
+
+async function sendCtrl(reg,value){
+const r=await api('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reg,value})});
+if(r&&r.status==='queued')toast('Command sent',true);
+else toast('Failed to send command',false);
+}
+
+// Poll status
+async function poll(){
+const d=await api('/api/status');
+if(!d){document.getElementById('conn-dot').classList.add('err');document.getElementById('conn-text').textContent='Disconnected';return;}
+document.getElementById('conn-dot').classList.remove('err');
+document.getElementById('conn-text').textContent='Connected';
+
+document.getElementById('d-water').textContent=d.waterTemp+'\u00b0C';
+document.getElementById('d-ambient').textContent=d.ambientTemp+'\u00b0C';
+document.getElementById('d-evap').textContent=d.evaporatorTemp+'\u00b0C';
+document.getElementById('d-setpoint').textContent=d.activeSetpoint+'\u00b0C';
+
+const stStr=STATES[d.operatingState]||'UNKNOWN';
+const el=document.getElementById('d-state');
+el.innerHTML='<span class="badge badge-'+(stStr==='HEATING'?'heating':stStr==='PV_BOOST'?'pv':'idle')+'">'+stStr+'</span>';
+
+document.getElementById('d-heatsrc').textContent=HEAT_SRC[d.heatSource]||'OFF';
+document.getElementById('d-program').textContent=PROGRAMS[d.program]||'?';
+document.getElementById('d-force').textContent=d.forceHeating?'YES':'No';
+document.getElementById('d-force').className='value '+(d.forceHeating?'warn':'');
+document.getElementById('d-pv').textContent=d.pvActive?'Active':'Inactive';
+document.getElementById('d-pv').className='value '+(d.pvActive?'good':'');
+
+document.getElementById('d-uptime').textContent=fmtUptime(d.uptime);
+document.getElementById('d-frames').textContent=d.framesReceived;
+document.getElementById('d-crc').textContent=d.crcErrors;
+document.getElementById('d-crc').className='value '+(d.crcErrors>0?'warn':'');
+document.getElementById('d-writes').textContent=d.writesInjected;
+
+// Installer
+if(d.frostProtectTemp!==undefined){
+document.getElementById('i-frost').textContent=d.frostProtectTemp+'\u00b0C';
+document.getElementById('i-legio').textContent=d.antiLegioInterval+' days';
+}
+if(d.bivalentThreshold!==undefined){
+document.getElementById('i-bival').textContent=d.bivalentThreshold+'\u00b0C';
+document.getElementById('i-pvtarget').textContent=d.pvTargetSetpoint+'\u00b0C';
+document.getElementById('i-extmax').textContent=d.extSourceMaxTemp+'\u00b0C';
+}
+
+// Populate settings inputs (only if not focused)
+if(document.activeElement.id!=='s-setpoint')document.getElementById('s-setpoint').value=d.dhwSetpoint;
+if(document.activeElement.id!=='s-program')document.getElementById('s-program').value=d.program;
+if(document.activeElement.id!=='s-eco')document.getElementById('s-eco').value=d.ecoDeviation;
+if(document.activeElement.id!=='s-komf')document.getElementById('s-komf').value=d.komfortDeviation;
+if(document.activeElement.id!=='s-aux')document.getElementById('s-aux').value=d.auxHeatMode;
+if(document.activeElement.id!=='s-ext')document.getElementById('s-ext').value=d.extInputFunction;
+}
+
+function fmtUptime(ms){
+const s=Math.floor(ms/1000);
+const h=Math.floor(s/3600);const m=Math.floor((s%3600)/60);
+return h+'h '+m+'m '+(s%60)+'s';
+}
+
+// Settings apply
+function setTemp(){
+const v=Math.round(parseFloat(document.getElementById('s-setpoint').value)*10);
+sendCtrl(0x0009,v);
+}
+function setProgram(){
+sendCtrl(0x000C,+document.getElementById('s-program').value);
+const eco=Math.round(parseFloat(document.getElementById('s-eco').value)*10);
+const komf=Math.round(parseFloat(document.getElementById('s-komf').value)*10);
+if(eco)sendCtrl(0x000A,eco<0?eco+65536:eco);
+if(komf>=0)sendCtrl(0x000B,komf);
+}
+function setInstaller(){
+const frost=Math.round(parseFloat(document.getElementById('ic-frost').value)*10);
+const legio=parseInt(document.getElementById('ic-legio').value);
+const pv=Math.round(parseFloat(document.getElementById('ic-pv').value)*10);
+const bival=Math.round(parseFloat(document.getElementById('ic-bival').value)*10);
+const extmax=Math.round(parseFloat(document.getElementById('ic-extmax').value)*10);
+if(frost)sendCtrl(0x0160,frost);
+if(!isNaN(legio))sendCtrl(0x015E,legio);
+if(pv)sendCtrl(0x019F,pv);
+if(bival||bival===0)sendCtrl(0x01A0,bival<0?bival+65536:bival);
+if(extmax)sendCtrl(0x01A3,extmax);
+toast('Installer settings queued',true);
+}
+
+// Schedule
+async function loadSchedule(){
+const d=await api('/api/registers');
+if(!d)return;
+renderSchedule('sched-dhw',d,0x0032);
+renderSchedule('sched-vent',d,0x01C2);
+}
+function renderSchedule(id,regs,base){
+const tbody=document.getElementById(id);
+let html='';
+for(let day=0;day<7;day++){
+html+='<tr><td><b>'+DAYS[day]+'</b></td>';
+for(let s=0;s<3;s++){
+const sr=base+day*6+s*2;
+const er=sr+1;
+const sk='0x'+sr.toString(16).toUpperCase().padStart(4,'0');
+const ek='0x'+er.toString(16).toUpperCase().padStart(4,'0');
+const sv=regs[sk],ev=regs[ek];
+if(sv===undefined||sv===65535){html+='<td style="color:var(--text2)">\u2014</td>';}
+else{
+const sh=Math.floor((sv&0x7F)*15/60),sm=(sv&0x7F)*15%60;
+const eh=Math.floor((ev&0x7F)*15/60),em=(ev&0x7F)*15%60;
+html+='<td>'+pad(sh)+':'+pad(sm)+' \u2013 '+pad(eh)+':'+pad(em)+'</td>';
+}
+}
+html+='</tr>';
+}
+tbody.innerHTML=html;
+}
+function pad(n){return n<10?'0'+n:''+n;}
+
+// Diagnostics
+async function loadDiag(){
+const[diag,regs]=await Promise.all([api('/api/diag'),api('/api/registers')]);
+if(diag){
+let html='';
+for(const[k,v]of Object.entries(diag)){
+if(k==='lastFrame')continue;
+html+='<div class="card-row"><span class="label">'+k+'</span><span class="value">'+v+'</span></div>';
+}
+html+='<div class="card-row"><span class="label">lastFrame</span><span class="value" style="font-family:monospace;font-size:0.8em">'+diag.lastFrame+'</span></div>';
+document.getElementById('diag-stats').innerHTML=html;
+}
+if(regs){
+let html='<table style="width:100%">';
+const keys=Object.keys(regs).sort((a,b)=>parseInt(a,16)-parseInt(b,16));
+for(const k of keys){
+const v=regs[k];
+const s=v>32767?v-65536:v;
+const f=(s/10).toFixed(1);
+html+='<tr><td style="color:var(--primary)">'+k+'</td><td>'+v+'</td><td style="color:var(--text2)">signed:'+s+' \u00d70.1='+f+'</td></tr>';
+}
+html+='</table>';
+document.getElementById('reg-dump').innerHTML=html;
+}
+}
+
+// Config
+async function loadConfig(){
+const[wifi,mqtt]=await Promise.all([api('/api/wifi'),api('/api/mqtt')]);
+if(wifi){document.getElementById('c-ssid').value=wifi.ssid||'';document.getElementById('c-pass').value=wifi.password||'';}
+if(mqtt){document.getElementById('c-mqtt-host').value=mqtt.host||'';document.getElementById('c-mqtt-port').value=mqtt.port||1883;document.getElementById('c-mqtt-user').value=mqtt.username||'';document.getElementById('c-mqtt-pass').value=mqtt.password||'';document.getElementById('c-mqtt-topic').value=mqtt.baseTopic||'aquamqtt';}
+}
+async function saveWifi(){
+const data={ssid:document.getElementById('c-ssid').value,password:document.getElementById('c-pass').value};
+const r=await api('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data,reboot:false})});
+toast(r&&r.status==='ok'?'WiFi saved':'Save failed',!!(r&&r.status==='ok'));
+}
+async function saveMqtt(){
+const data={host:document.getElementById('c-mqtt-host').value,port:+document.getElementById('c-mqtt-port').value,username:document.getElementById('c-mqtt-user').value,password:document.getElementById('c-mqtt-pass').value,baseTopic:document.getElementById('c-mqtt-topic').value};
+const r=await api('/api/mqtt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data,reboot:false})});
+toast(r&&r.status==='ok'?'MQTT saved':'Save failed',!!(r&&r.status==='ok'));
+}
+
+// Start polling
+poll();
+setInterval(poll,2000);
+</script>
+</body>
+</html>
