@@ -83,7 +83,7 @@ function ErrorPage() {
 
   return (
     <div style={errorPageStyles.container}>
-      <img src="/app/icon.png" alt="EMS-ESP Logo" style={errorPageStyles.logo} />
+      <img src="/app/icon.png" alt="AquaMQTT Logo" style={errorPageStyles.logo} />
       <h1 style={errorPageStyles.title}>The WebUI is having problems</h1>
       <p style={errorPageStyles.message}>
         {getErrorStatus(error)}: {getErrorMessage(error)}
@@ -91,12 +91,12 @@ function ErrorPage() {
       <p style={errorPageStyles.message2}>
         Please report on{' '}
         <a
-          href="https://emsesp.org/Support"
+          href="https://github.com/Psychotonikum/AquaMQTT/issues"
           target="_blank"
           rel="noreferrer"
           style={{ color: 'inherit', textDecoration: 'underline' }}
         >
-          https://emsesp.org/Support
+          https://github.com/Psychotonikum/AquaMQTT/issues
         </a>
       </p>
     </div>

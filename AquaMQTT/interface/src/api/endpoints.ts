@@ -16,7 +16,15 @@ const handleResponse = async (response: AlovaXHRResponse) => {
   if (response.status >= 400) {
     throw new Error(response.statusText);
   }
-  return (await response.data) as unknown;
+  const data = response.data;
+  if (typeof data === 'string') {
+    try {
+      return JSON.parse(data);
+    } catch {
+      return data;
+    }
+  }
+  return data as unknown;
 };
 
 export const alovaInstance = createAlova({

@@ -428,7 +428,7 @@ void WebHandler::setup()
 
         json += ",{\"id\":"; json += eid++;
         json += ",\"dv\":{\"id\":\"00Free Heap\",\"v\":";
-        json += ESP.getFreeHeap();
+        json += (ESP.getFreeHeap() / 1024);
         json += ",\"u\":12}}";  // UOM 12 = KB
 
         json += "]}";
