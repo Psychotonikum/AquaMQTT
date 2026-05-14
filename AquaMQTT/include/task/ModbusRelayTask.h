@@ -37,6 +37,9 @@ private:
     void processAndForward(uint8_t* buffer, uint8_t length, HardwareSerial& destination, bool fromHmi);
     void parseFrame(uint8_t* buffer, uint8_t length, bool fromHmi);
     void injectPendingWrites();
+    void injectPeriodicReads();
+    void sendToMain(uint8_t* frame, uint8_t len);
+    int  receiveFromMain(uint8_t* buf, uint8_t maxLen, uint16_t timeoutMs = 100);
 
     // HMI side (Serial1) frame assembly
     uint8_t       mHmiFrameBuffer[message::optitronic2::MODBUS_MAX_FRAME_SIZE];
@@ -67,6 +70,10 @@ private:
     uint32_t mLastStatsUpdate;
     uint32_t mEchoBytes;
     uint32_t mTxBytesWritten;
+
+    // Periodic read injection
+    unsigned long mLastPeriodicRead;
+    uint8_t       mPeriodicReadIndex;
 
     // Last forwarded frame for debugging
     uint8_t  mLastFwdFrame[32];

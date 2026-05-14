@@ -241,11 +241,31 @@ uint16_t Optitronic2State::getOperatingState() const
 bool Optitronic2State::isPvActive() const
 {
     uint16_t raw;
-    if (getRegister(REG_PV_INPUT_STATUS, raw))
+    if (getRegister(REG_COMPRESSOR_STATUS, raw))
     {
-        return raw == PV_STATUS_ACTIVE;
+        return raw == COMP_PV_ACTIVE;
     }
     return false;
+}
+
+uint16_t Optitronic2State::getHeatSource() const
+{
+    uint16_t raw;
+    if (getRegister(REG_HEAT_SOURCE_ACTIVE, raw))
+    {
+        return raw;
+    }
+    return 0;
+}
+
+uint16_t Optitronic2State::getCompressorStatus() const
+{
+    uint16_t raw;
+    if (getRegister(REG_COMPRESSOR_STATUS, raw))
+    {
+        return raw;
+    }
+    return 0;
 }
 
 bool Optitronic2State::isQuickHeatActive() const

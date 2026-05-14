@@ -29,6 +29,8 @@ constexpr char PV_ACTIVE[]          = "statePV";
 constexpr char ACTIVE_SETPOINT[]    = "activeSetpoint";
 constexpr char OPERATING_STATE[]    = "operatingState";
 constexpr char QUICK_HEAT_ACTIVE[]  = "quickHeatActive";
+constexpr char HEAT_SOURCE[]        = "heatSource";
+constexpr char COMPRESSOR_STATUS[]  = "heatingTrigger";
 
 // Settings topics (read + writable)
 constexpr char DHW_SETPOINT[]       = "waterTempTarget";
@@ -89,6 +91,7 @@ constexpr char ENUM_EXT_FUNCTION1[]    = "FUNCTION1";
 
 // Operating state enum strings
 constexpr char ENUM_STATE_IDLE[]     = "IDLE";
+constexpr char ENUM_STATE_HEATING[]  = "HEATING";
 constexpr char ENUM_STATE_PV_BOOST[] = "PV_BOOST";
 constexpr char ENUM_STATE_UNKNOWN[]  = "UNKNOWN";
 
@@ -196,6 +199,10 @@ void Optitronic2MQTTTask::loop()
     if (notifyValue & Optitronic2State::CHANGE_INSTALLER)
     {
         publishInstaller();
+    }
+    if (notifyValue & Optitronic2State::CHANGE_SCHEDULE)
+    {
+        publishInstaller();  // schedule is published inside publishInstaller
     }
 
     // Full update every 60s regardless of changes
@@ -354,8 +361,11 @@ void Optitronic2MQTTTask::publishState()
     const char* stateStr = o2mqtt::ENUM_STATE_UNKNOWN;
     switch (state.getOperatingState())
     {
-        case STATE_IDLE_HEATING:
+        case STATE_IDLE:
             stateStr = o2mqtt::ENUM_STATE_IDLE;
+            break;
+        case STATE_HEATING:
+            stateStr = o2mqtt::ENUM_STATE_HEATING;
             break;
         case STATE_PV_BOOST:
             stateStr = o2mqtt::ENUM_STATE_PV_BOOST;
@@ -363,6 +373,25 @@ void Optitronic2MQTTTask::publishState()
     }
     publishString(o2mqtt::OPERATING_STATE, stateStr);
     publishBool(o2mqtt::QUICK_HEAT_ACTIVE, state.isQuickHeatActive());
+
+    // Heat source active
+    const char* heatSrcStr = "OFF";
+    switch (state.getHeatSource())
+    {
+        case HEAT_SRC_ELECTRIC:  heatSrcStr = "ELECTRIC"; break;
+        case HEAT_SRC_HEATPUMP:  heatSrcStr = "HEATPUMP"; break;
+        case HEAT_SRC_BOTH:      heatSrcStr = "BOTH"; break;
+    }
+    publishString(o2mqtt::HEAT_SOURCE, heatSrcStr);
+
+    // Compressor status
+    const char* compStr = "IDLE";
+    switch (state.getCompressorStatus())
+    {
+        case COMP_RUNNING:    compStr = "RUNNING"; break;
+        case COMP_PV_ACTIVE:  compStr = "PV_ACTIVE"; break;
+    }
+    publishString(o2mqtt::COMPRESSOR_STATUS, compStr);
 }
 
 void Optitronic2MQTTTask::publishInstaller()
@@ -380,6 +409,46 @@ void Optitronic2MQTTTask::publishInstaller()
         publishFloat(o2mqtt::BIVALENT_THRESHOLD, state.getBivalentThreshold());
         publishFloat(o2mqtt::PV_TARGET, state.getPvTargetSetpoint());
         publishFloat(o2mqtt::EXT_MAX_TEMP, state.getExtSourceMaxTemp());
+    }
+
+    // Publish DHW schedule as JSON if available
+    if (state.hasBlock(REG_SCHEDULE_DHW_START))
+    {
+        String json = "[";
+        static const char* days[] = {"Mon","Tue","Wed","Thu","Fri","Sat","Sun"};
+        for (int d = 0; d < 7; d++)
+        {
+            if (d > 0) json += ",";
+            json += "{\"day\":\"";
+            json += days[d];
+            json += "\",\"slots\":[";
+            for (int s = 0; s < 3; s++)
+            {
+                uint16_t sv, ev;
+                uint16_t sr = REG_SCHEDULE_DHW_START + d * 6 + s * 2;
+                uint16_t er = sr + 1;
+                state.getRegister(sr, sv);
+                state.getRegister(er, ev);
+                if (s > 0) json += ",";
+                if (sv == SCHED_DISABLED)
+                {
+                    json += "null";
+                }
+                else
+                {
+                    uint8_t sh = ((sv & SCHED_TIME_MASK) * 15) / 60;
+                    uint8_t sm = ((sv & SCHED_TIME_MASK) * 15) % 60;
+                    uint8_t eh = ((ev & SCHED_TIME_MASK) * 15) / 60;
+                    uint8_t em = ((ev & SCHED_TIME_MASK) * 15) % 60;
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "\"%02d:%02d-%02d:%02d\"", sh, sm, eh, em);
+                    json += buf;
+                }
+            }
+            json += "]}";
+        }
+        json += "]";
+        publishString("schedule/dhw", json.c_str());
     }
 }
 

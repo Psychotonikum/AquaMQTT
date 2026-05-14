@@ -19,8 +19,10 @@ constexpr uint16_t REG_BLOCK1_START = 0x0000;
 constexpr uint16_t REG_BLOCK1_COUNT = 25;
 
 constexpr uint16_t REG_ACTIVE_SETPOINT     = 0x0000;  // int16 ×0.1°C (effective target, e.g. 450=45.0°C or 700=70.0°C in PV mode)
-constexpr uint16_t REG_OPERATING_STATE     = 0x0001;  // enum: 2=idle/heating, 6=PV-boost
-constexpr uint16_t REG_OPERATING_SUBSTATE  = 0x0002;  // enum: 2=normal, 3=?
+constexpr uint16_t REG_OPERATING_STATE     = 0x0001;  // enum: 2=idle, 3=heating, 6=PV-boost
+constexpr uint16_t REG_OPERATING_SUBSTATE  = 0x0002;  // enum: 0=init, 3=normal
+constexpr uint16_t REG_HEAT_SOURCE_ACTIVE  = 0x0005;  // enum: 0=off, 2=heat_pump (1=electric?, 3=both?)
+constexpr uint16_t REG_FAN_COMPRESSOR_LVL  = 0x0006;  // enum: 0=off, 3=high (1=low?, 2=med?)
 constexpr uint16_t REG_DHW_SETPOINT        = 0x0009;  // int16 ×0.1°C (user setting, e.g. 550=55.0°C)
 constexpr uint16_t REG_ECO_DEVIATION       = 0x000A;  // int16 ×0.1°C (signed, e.g. 0xFF9C = -10.0°C)
 constexpr uint16_t REG_KOMFORT_DEVIATION   = 0x000B;  // int16 ×0.1°C (e.g. 0x0014 = +2.0°C)
@@ -41,7 +43,7 @@ constexpr uint16_t REG_WATER_TEMP          = 0x00C8;  // int16 ×0.1°C (tank to
 constexpr uint16_t REG_SENSOR_UNKNOWN_C9   = 0x00C9;  // 0xF334 — pressure transducer?
 constexpr uint16_t REG_AMBIENT_TEMP        = 0x00CA;  // int16 ×0.1°C (intake/ambient air)
 constexpr uint16_t REG_EVAPORATOR_TEMP     = 0x00CB;  // int16 ×0.1°C (evaporator/collector)
-constexpr uint16_t REG_PV_INPUT_STATUS     = 0x00D1;  // enum: 0=open (no PV), 4=closed (PV active)
+constexpr uint16_t REG_COMPRESSOR_STATUS   = 0x00D1;  // enum: 0=none, 2=demand-triggered, 4=PV-signal-triggered (latched)
 
 // Block 3: Status Flags (0x00E1 + 6 regs)
 constexpr uint16_t REG_BLOCK3_START = 0x00E1;
@@ -121,15 +123,32 @@ enum Optitronic2ExtInputFunction : uint16_t
 
 enum Optitronic2OperatingState : uint16_t
 {
-    STATE_IDLE_HEATING = 2,
+    STATE_IDLE         = 2,
+    STATE_HEATING      = 3,
     STATE_PV_BOOST     = 6,
 };
 
-enum Optitronic2PvStatus : uint16_t
+enum Optitronic2HeatSource : uint16_t
 {
-    PV_STATUS_INACTIVE = 0,
-    PV_STATUS_ACTIVE   = 4,
+    HEAT_SRC_OFF       = 0,
+    HEAT_SRC_ELECTRIC  = 1,
+    HEAT_SRC_HEATPUMP  = 2,
+    HEAT_SRC_BOTH      = 3,
 };
+
+enum Optitronic2CompressorStatus : uint16_t
+{
+    COMP_IDLE          = 0,
+    COMP_RUNNING       = 2,
+    COMP_PV_ACTIVE     = 4,
+};
+
+// Schedule encoding: bits 15:13 = type (001=start, 111=end), bits 6:0 = quarter-hours (0-95 = 00:00-23:45)
+// 0xFFFF = disabled slot. 7 days × 6 regs (3 start/end pairs per day).
+constexpr uint16_t SCHED_FLAG_START = 0x2000;
+constexpr uint16_t SCHED_FLAG_END   = 0xE000;
+constexpr uint16_t SCHED_TIME_MASK  = 0x007F;
+constexpr uint16_t SCHED_DISABLED   = 0xFFFF;
 
 // Quick-heat register bit manipulation
 constexpr uint16_t QUICK_HEAT_ACTIVATE_BIT = 0x8000;

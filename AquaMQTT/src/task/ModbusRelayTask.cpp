@@ -40,6 +40,8 @@ ModbusRelayTask::ModbusRelayTask()
     , mLastStatsUpdate(0)
     , mEchoBytes(0)
     , mTxBytesWritten(0)
+    , mLastPeriodicRead(0)
+    , mPeriodicReadIndex(0)
     , mLastFwdFrame{}
     , mLastFwdFrameLen(0)
 {
@@ -171,6 +173,7 @@ void ModbusRelayTask::loop()
     if (!mHmiFrameInProgress && !mMainFrameInProgress)
     {
         injectPendingWrites();
+        injectPeriodicReads();
     }
 
     // ===== Periodic stats update =====
@@ -371,30 +374,35 @@ void ModbusRelayTask::injectPendingWrites()
     frame[4] = (value >> 8) & 0xFF;
     frame[5] = value & 0xFF;
 
-    // Calculate CRC-16/Modbus
     uint16_t crc = 0xFFFF;
     for (uint8_t i = 0; i < 6; i++)
     {
         crc ^= frame[i];
         for (uint8_t b = 0; b < 8; b++)
         {
-            if (crc & 0x0001)
-            {
-                crc >>= 1;
-                crc ^= 0xA001;
-            }
-            else
-            {
-                crc >>= 1;
-            }
+            crc = (crc & 1) ? ((crc >> 1) ^ 0xA001) : (crc >> 1);
         }
     }
     frame[6] = crc & 0xFF;
     frame[7] = (crc >> 8) & 0xFF;
 
-    // === ONE-WIRE UART: Connect TX signal to both pins before transmitting ===
+    sendToMain(frame, 8);
+    mWritesInjected++;
+
+    Serial.printf("[relay] WRITE reg=0x%04X val=0x%04X\n", reg, value);
+
+    // Wait for response from slave
+    uint8_t respBuf[16];
+    int respLen = receiveFromMain(respBuf, sizeof(respBuf), 50);
+    if (respLen >= 5)
+    {
+        parseFrame(respBuf, respLen, false);
+    }
+}
+
+void ModbusRelayTask::sendToMain(uint8_t* frame, uint8_t len)
+{
     int txSignal = uart_periph_signal[2].pins[SOC_UART_TX_PIN_IDX].signal;
-    int rxSignal = uart_periph_signal[2].pins[SOC_UART_RX_PIN_IDX].signal;
 
     gpio_set_direction((gpio_num_t)config::GPIO_MAIN_TX, GPIO_MODE_OUTPUT);
     esp_rom_gpio_connect_out_signal(config::GPIO_MAIN_TX, txSignal, false, false);
@@ -402,59 +410,105 @@ void ModbusRelayTask::injectPendingWrites()
     esp_rom_gpio_connect_out_signal(config::GPIO_MAIN_RX, txSignal, false, false);
     delayMicroseconds(10);
 
-    // Ensure inter-frame silence before injecting
     vTaskDelay(pdMS_TO_TICKS(3));
-
-    // Enable translator transmit direction
     digitalWrite(config::GPIO_ENABLE_TX_MAIN, HIGH);
-
-    // Send write frame
-    Serial2.write(frame, 8);
+    Serial2.write(frame, len);
     Serial2.flush();
-
-    // Back to receive mode
     digitalWrite(config::GPIO_ENABLE_TX_MAIN, LOW);
 
-    // Disconnect TX pins, restore RX input
+    int rxSignal = uart_periph_signal[2].pins[SOC_UART_RX_PIN_IDX].signal;
     esp_rom_gpio_connect_out_signal(config::GPIO_MAIN_TX, SIG_GPIO_OUT_IDX, false, false);
     gpio_set_direction((gpio_num_t)config::GPIO_MAIN_TX, GPIO_MODE_INPUT);
     esp_rom_gpio_connect_out_signal(config::GPIO_MAIN_RX, SIG_GPIO_OUT_IDX, false, false);
     gpio_set_direction((gpio_num_t)config::GPIO_MAIN_RX, GPIO_MODE_INPUT);
     esp_rom_gpio_connect_in_signal(config::GPIO_MAIN_RX, rxSignal, false);
 
-    // Clear echo bytes
     delayMicroseconds(200);
     while (Serial2.available()) { Serial2.read(); mEchoBytes++; }
+}
 
-    mWritesInjected++;
-
-    Serial.printf("[relay] WRITE reg=0x%04X val=0x%04X\n", reg, value);
-
-    // Wait for response from slave (up to 50ms)
+int ModbusRelayTask::receiveFromMain(uint8_t* buf, uint8_t maxLen, uint16_t timeoutMs)
+{
+    int received = 0;
     unsigned long start = millis();
-    while ((millis() - start) < 50)
+    unsigned long lastByte = start;
+
+    while ((millis() - start) < timeoutMs && received < maxLen)
     {
         if (Serial2.available())
         {
-            uint8_t respBuf[16];
-            uint8_t respLen = 0;
-            unsigned long lastByte = millis();
-            while ((millis() - lastByte) < MODBUS_FRAME_SILENCE_MS && respLen < 16)
-            {
-                if (Serial2.available())
-                {
-                    respBuf[respLen++] = Serial2.read();
-                    lastByte = millis();
-                }
-            }
-            if (respLen >= 5)
-            {
-                parseFrame(respBuf, respLen, false);
-            }
-            break;
+            buf[received++] = Serial2.read();
+            lastByte = millis();
         }
-        vTaskDelay(pdMS_TO_TICKS(1));
+        else if (received > 0 && (millis() - lastByte) >= MODBUS_FRAME_SILENCE_MS)
+        {
+            break;  // frame complete
+        }
     }
+    return received;
+}
+
+void ModbusRelayTask::injectPeriodicReads()
+{
+    unsigned long now = millis();
+
+    // Poll installer blocks every 30 seconds
+    if ((now - mLastPeriodicRead) < 30000)
+    {
+        return;
+    }
+
+    // Rotate through read blocks
+    static const struct { uint16_t startReg; uint16_t qty; } blocks[] = {
+        { REG_INSTALLER_BLK1_START, REG_INSTALLER_BLK1_COUNT },
+        { REG_INSTALLER_BLK2_START, REG_INSTALLER_BLK2_COUNT },
+        { REG_SCHEDULE_DHW_START,   REG_SCHEDULE_DHW_COUNT },
+        { REG_SCHEDULE_VENT_START,  REG_SCHEDULE_VENT_COUNT },
+    };
+
+    uint8_t idx = mPeriodicReadIndex % 4;
+    uint16_t startReg = blocks[idx].startReg;
+    uint16_t qty      = blocks[idx].qty;
+
+    // Build Modbus read request: slave=0x01, FC=0x03
+    uint8_t frame[8];
+    frame[0] = MODBUS_SLAVE_ADDRESS;
+    frame[1] = FC_READ_HOLDING_REGISTERS;
+    frame[2] = (startReg >> 8) & 0xFF;
+    frame[3] = startReg & 0xFF;
+    frame[4] = (qty >> 8) & 0xFF;
+    frame[5] = qty & 0xFF;
+
+    uint16_t crc = 0xFFFF;
+    for (uint8_t i = 0; i < 6; i++)
+    {
+        crc ^= frame[i];
+        for (uint8_t b = 0; b < 8; b++)
+        {
+            crc = (crc & 1) ? ((crc >> 1) ^ 0xA001) : (crc >> 1);
+        }
+    }
+    frame[6] = crc & 0xFF;
+    frame[7] = (crc >> 8) & 0xFF;
+
+    // Track as pending read so response gets parsed
+    mPendingReadRequest  = true;
+    mPendingReadStartReg = startReg;
+    mPendingReadQuantity = qty;
+
+    sendToMain(frame, 8);
+
+    // Wait for response
+    uint8_t respBuf[128];
+    int respLen = receiveFromMain(respBuf, sizeof(respBuf), 100);
+    if (respLen >= 5)
+    {
+        parseFrame(respBuf, respLen, false);
+    }
+    mPendingReadRequest = false;
+
+    mPeriodicReadIndex++;
+    mLastPeriodicRead = now;
 }
 
 }  // namespace aquamqtt

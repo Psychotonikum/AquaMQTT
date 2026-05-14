@@ -67,6 +67,8 @@ public:
     uint16_t getAuxHeatMode() const;
     uint16_t getExtInputFunction() const;
     uint16_t getOperatingState() const;
+    uint16_t getHeatSource() const;
+    uint16_t getCompressorStatus() const;
     bool     isPvActive() const;
     bool     isQuickHeatActive() const;
     float    getQuickHeatTarget() const;
