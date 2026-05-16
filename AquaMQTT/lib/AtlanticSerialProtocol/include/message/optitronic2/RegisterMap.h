@@ -123,9 +123,15 @@ enum Optitronic2ExtInputFunction : uint16_t
 
 enum Optitronic2OperatingState : uint16_t
 {
-    STATE_IDLE         = 2,
-    STATE_HEATING      = 3,
-    STATE_PV_BOOST     = 6,
+    STATE_OFF              = 0,
+    STATE_STANDBY          = 1,
+    STATE_IDLE             = 2,
+    STATE_HEATING          = 3,
+    STATE_HEATING_ELECTRIC = 4,
+    STATE_HEATING_BOTH     = 5,
+    STATE_PV_BOOST         = 6,
+    STATE_DEFROST          = 7,
+    STATE_ANTI_LEGIONELLA  = 8,
 };
 
 enum Optitronic2HeatSource : uint16_t

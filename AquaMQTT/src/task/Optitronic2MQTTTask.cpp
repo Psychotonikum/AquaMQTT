@@ -90,10 +90,16 @@ constexpr char ENUM_EXT_RESERVE[]      = "RESERVE";
 constexpr char ENUM_EXT_FUNCTION1[]    = "FUNCTION1";
 
 // Operating state enum strings
-constexpr char ENUM_STATE_IDLE[]     = "IDLE";
-constexpr char ENUM_STATE_HEATING[]  = "HEATING";
-constexpr char ENUM_STATE_PV_BOOST[] = "PV_BOOST";
-constexpr char ENUM_STATE_UNKNOWN[]  = "UNKNOWN";
+constexpr char ENUM_STATE_OFF[]              = "OFF";
+constexpr char ENUM_STATE_STANDBY[]          = "STANDBY";
+constexpr char ENUM_STATE_IDLE[]             = "IDLE";
+constexpr char ENUM_STATE_HEATING[]          = "HEATING";
+constexpr char ENUM_STATE_HEATING_ELECTRIC[] = "HEATING_ELECTRIC";
+constexpr char ENUM_STATE_HEATING_BOTH[]     = "HEATING_BOTH";
+constexpr char ENUM_STATE_PV_BOOST[]         = "PV_BOOST";
+constexpr char ENUM_STATE_DEFROST[]          = "DEFROST";
+constexpr char ENUM_STATE_ANTI_LEGIONELLA[]  = "ANTI_LEGIONELLA";
+constexpr char ENUM_STATE_UNKNOWN[]          = "UNKNOWN";
 
 // Aux heat mode enum strings
 constexpr char ENUM_AUX_ELECTRIC[] = "ELECTRIC";
@@ -358,20 +364,40 @@ void Optitronic2MQTTTask::publishState()
 
     publishFloat(o2mqtt::ACTIVE_SETPOINT, state.getActiveSetpoint());
 
+    uint16_t rawState = state.getOperatingState();
     const char* stateStr = o2mqtt::ENUM_STATE_UNKNOWN;
-    switch (state.getOperatingState())
+    switch (rawState)
     {
+        case STATE_OFF:
+            stateStr = o2mqtt::ENUM_STATE_OFF;
+            break;
+        case STATE_STANDBY:
+            stateStr = o2mqtt::ENUM_STATE_STANDBY;
+            break;
         case STATE_IDLE:
             stateStr = o2mqtt::ENUM_STATE_IDLE;
             break;
         case STATE_HEATING:
             stateStr = o2mqtt::ENUM_STATE_HEATING;
             break;
+        case STATE_HEATING_ELECTRIC:
+            stateStr = o2mqtt::ENUM_STATE_HEATING_ELECTRIC;
+            break;
+        case STATE_HEATING_BOTH:
+            stateStr = o2mqtt::ENUM_STATE_HEATING_BOTH;
+            break;
         case STATE_PV_BOOST:
             stateStr = o2mqtt::ENUM_STATE_PV_BOOST;
             break;
+        case STATE_DEFROST:
+            stateStr = o2mqtt::ENUM_STATE_DEFROST;
+            break;
+        case STATE_ANTI_LEGIONELLA:
+            stateStr = o2mqtt::ENUM_STATE_ANTI_LEGIONELLA;
+            break;
     }
     publishString(o2mqtt::OPERATING_STATE, stateStr);
+    publishInt("operatingStateRaw", rawState);
     publishBool(o2mqtt::QUICK_HEAT_ACTIVE, state.isQuickHeatActive());
 
     // Heat source active
