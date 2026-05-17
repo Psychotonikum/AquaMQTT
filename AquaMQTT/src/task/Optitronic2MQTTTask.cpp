@@ -402,6 +402,8 @@ void Optitronic2MQTTTask::publishInstaller()
     {
         publishFloat(o2mqtt::FROST_PROTECT, state.getFrostProtectTemp());
         publishInt(o2mqtt::ANTI_LEGIO_DAYS, state.getAntiLegioInterval());
+        publishString("extSourcePriority",
+                      state.getExtSourcePriority() == 0 ? o2mqtt::ENUM_PRIORITY_DEVICE : o2mqtt::ENUM_PRIORITY_EXTERNAL);
     }
 
     if (state.hasBlock(REG_INSTALLER_BLK2_START))
@@ -588,12 +590,43 @@ void Optitronic2MQTTTask::publishDiscovery()
     publishSensorDiscovery("Evaporator Temperature", o2mqtt::EVAPORATOR_TEMP, "°C", "temperature", "evap_temp");
     publishSensorDiscovery("Active Setpoint", o2mqtt::ACTIVE_SETPOINT, "°C", "temperature", "active_setpoint");
     publishSensorDiscovery("Operating State", o2mqtt::OPERATING_STATE, nullptr, nullptr, "op_state");
+    publishSensorDiscovery("Heat Source", o2mqtt::HEAT_SOURCE, nullptr, nullptr, "heat_source");
+    publishSensorDiscovery("Heating Trigger", o2mqtt::COMPRESSOR_STATUS, nullptr, nullptr, "heat_trigger");
     publishSensorDiscovery("PV Active", o2mqtt::PV_ACTIVE, nullptr, nullptr, "pv_active");
     publishSensorDiscovery("Quick Heat Active", o2mqtt::QUICK_HEAT_ACTIVE, nullptr, nullptr, "quick_heat");
+    publishSensorDiscovery("Eco Deviation", o2mqtt::ECO_DEVIATION, "°C", "temperature", "eco_dev");
+    publishSensorDiscovery("Komfort Deviation", o2mqtt::KOMFORT_DEVIATION, "°C", "temperature", "komf_dev");
+    publishSensorDiscovery("Aux Heat Mode", o2mqtt::AUX_HEAT_MODE, nullptr, nullptr, "aux_heat_mode");
+    publishSensorDiscovery("Frost Protection Temp", o2mqtt::FROST_PROTECT, "°C", "temperature", "frost_protect");
+    publishSensorDiscovery("Anti-Legionella Interval", o2mqtt::ANTI_LEGIO_DAYS, "d", nullptr, "anti_legio_interval");
+    publishSensorDiscovery("Bivalent Threshold", o2mqtt::BIVALENT_THRESHOLD, "°C", "temperature", "bivalent_threshold");
+    publishSensorDiscovery("PV Target Setpoint", o2mqtt::PV_TARGET, "°C", "temperature", "pv_target");
+    publishSensorDiscovery("Ext Source Max Temp", o2mqtt::EXT_MAX_TEMP, "°C", "temperature", "ext_max_temp");
 
     // --- Controllable entities ---
     publishNumberDiscovery("DHW Target Temperature", o2mqtt::DHW_SETPOINT, o2mqtt::CTRL_SET_TEMP,
                            35.0, 70.0, 0.5, "°C", "dhw_setpoint");
+
+    publishNumberDiscovery("Eco Deviation", o2mqtt::ECO_DEVIATION, o2mqtt::CTRL_ECO_DEV,
+                           -15.0, 0.0, 0.5, "°C", "ctrl_eco_dev");
+
+    publishNumberDiscovery("Komfort Deviation", o2mqtt::KOMFORT_DEVIATION, o2mqtt::CTRL_KOMF_DEV,
+                           0.0, 10.0, 0.5, "°C", "ctrl_komf_dev");
+
+    publishNumberDiscovery("Frost Protection Temp", o2mqtt::FROST_PROTECT, o2mqtt::CTRL_FROST_PROT,
+                           2.0, 15.0, 0.5, "°C", "ctrl_frost_protect");
+
+    publishNumberDiscovery("Anti-Legionella Interval", o2mqtt::ANTI_LEGIO_DAYS, o2mqtt::CTRL_ANTI_LEGIO_INT,
+                           0.0, 30.0, 1.0, "d", "ctrl_anti_legio");
+
+    publishNumberDiscovery("PV Target Setpoint", o2mqtt::PV_TARGET, o2mqtt::CTRL_PV_TARGET,
+                           35.0, 70.0, 0.5, "°C", "ctrl_pv_target");
+
+    publishNumberDiscovery("Bivalent Threshold", o2mqtt::BIVALENT_THRESHOLD, o2mqtt::CTRL_BIVALENT,
+                           -10.0, 20.0, 0.5, "°C", "ctrl_bivalent");
+
+    publishNumberDiscovery("Ext Source Max Temp", o2mqtt::EXT_MAX_TEMP, o2mqtt::CTRL_EXT_MAX_TEMP,
+                           35.0, 70.0, 0.5, "°C", "ctrl_ext_max");
 
     const char* programOptions[] = { o2mqtt::ENUM_PROGRAM_NORMAL, o2mqtt::ENUM_PROGRAM_ECO,
                                      o2mqtt::ENUM_PROGRAM_KOMFORT, o2mqtt::ENUM_PROGRAM_KOMFORT_PLUS };
@@ -607,6 +640,14 @@ void Optitronic2MQTTTask::publishDiscovery()
                                       o2mqtt::ENUM_EXT_FUNCTION1 };
     publishSelectDiscovery("External Input Function", o2mqtt::EXT_INPUT_FN, o2mqtt::CTRL_SET_EXT_INPUT,
                            extInputOptions, 9, "ext_input");
+
+    const char* auxHeatOptions[] = { o2mqtt::ENUM_AUX_ELECTRIC, o2mqtt::ENUM_AUX_EXTERNAL, o2mqtt::ENUM_AUX_BOTH };
+    publishSelectDiscovery("Aux Heat Mode", o2mqtt::AUX_HEAT_MODE, o2mqtt::CTRL_AUX_HEAT,
+                           auxHeatOptions, 3, "aux_heat");
+
+    const char* priorityOptions[] = { o2mqtt::ENUM_PRIORITY_DEVICE, o2mqtt::ENUM_PRIORITY_EXTERNAL };
+    publishSelectDiscovery("Ext Source Priority", "extSourcePriority", o2mqtt::CTRL_EXT_PRIORITY,
+                           priorityOptions, 2, "ext_priority");
 
     publishSwitchDiscovery("Force Heating", o2mqtt::FORCE_HEATING, o2mqtt::CTRL_FORCE_HEAT, "force_heating");
 

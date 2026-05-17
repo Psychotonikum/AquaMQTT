@@ -80,6 +80,7 @@ public:
     float    getPvTargetSetpoint() const;
     float    getExtSourceMaxTemp() const;
     uint16_t getAntiLegioInterval() const;
+    uint16_t getExtSourcePriority() const;
 
     // --- Statistics ---
     struct Stats

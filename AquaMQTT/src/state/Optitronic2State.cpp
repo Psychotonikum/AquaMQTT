@@ -348,6 +348,16 @@ uint16_t Optitronic2State::getAntiLegioInterval() const
     return 0;
 }
 
+uint16_t Optitronic2State::getExtSourcePriority() const
+{
+    uint16_t raw;
+    if (getRegister(REG_EXT_SOURCE_PRIORITY, raw))
+    {
+        return raw;
+    }
+    return 0;
+}
+
 // --- Statistics ---
 
 void Optitronic2State::updateStats(uint32_t framesRx, uint32_t crcErr)
