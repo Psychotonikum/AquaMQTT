@@ -1,1 +1,5 @@
 **/.DS_Store
+**/node_modules/
+AquaMQTT/interface/dist/
+AquaMQTT/interface/.typesafe-i18n/
+AquaMQTT/analyse.html

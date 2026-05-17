@@ -1,0 +1,7 @@
+node_modules/
+build/
+dist/
+src/i18n/*
+
+.prettierrc
+.typesafe-i18n.json

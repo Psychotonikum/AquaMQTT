@@ -23,7 +23,12 @@ WebHandler::WebHandler()
 
 void WebHandler::setup()
 {
-    // Serve static files
+    // Serve static files for React SPA
+    mServer.serveStatic("/assets/", LittleFS, "/assets/");
+    mServer.serveStatic("/css/", LittleFS, "/css/");
+    mServer.serveStatic("/fonts/", LittleFS, "/fonts/");
+    mServer.serveStatic("/app/", LittleFS, "/app/");
+    mServer.serveStatic("/favicon.ico", LittleFS, "/favicon.ico");
     mServer.serveStatic("/web/", LittleFS, "/web/");
 
     // Root page
@@ -164,6 +169,394 @@ void WebHandler::setup()
         request->send(200, "application/json", "{\"status\":\"queued\"}");
     });
     mServer.addHandler(ctrlHandler);
+
+    // ===== EMS-ESP32 compatible REST endpoints for web UI =====
+
+    // Dashboard data (tree table format)
+    mServer.on("/rest/dashboardData", HTTP_GET, [](AsyncWebServerRequest* request) {
+        using namespace aquamqtt::message::optitronic2;
+        auto& state = aquamqtt::Optitronic2State::getInstance();
+
+        // Build JSON matching EMS-ESP32 DashboardData format:
+        // { connected: true, nodes: [ { id, t, n, nodes: [ { id, dv: { id, v, u, c, m, x, s, l } } ] } ] }
+        // Device types: we use a generic type=5 for the heat pump
+        // Entity IDs: first 2 hex chars are mask (00=readable, writable entities have mask+command)
+        // UOM: 0=NONE, 1=DEGREES, 3=PERCENT, 7=HOURS, 8=MINUTES
+
+        String json = "{\"connected\":true,\"nodes\":[";
+
+        // --- Device 1: Heat Pump Status (id=1) ---
+        json += "{\"id\":1,\"t\":5,\"n\":\"Heat Pump\",\"nodes\":[";
+        int eid = 100;
+
+        // Water Temperature
+        json += "{\"id\":"; json += eid++;
+        json += ",\"dv\":{\"id\":\"00Water Temperature\",\"v\":";
+        json += String(state.getWaterTemp(), 1);
+        json += ",\"u\":1}}";
+
+        // Ambient Temperature
+        json += ",{\"id\":"; json += eid++;
+        json += ",\"dv\":{\"id\":\"00Ambient Temperature\",\"v\":";
+        json += String(state.getAmbientTemp(), 1);
+        json += ",\"u\":1}}";
+
+        // Evaporator Temperature
+        json += ",{\"id\":"; json += eid++;
+        json += ",\"dv\":{\"id\":\"00Evaporator Temperature\",\"v\":";
+        json += String(state.getEvaporatorTemp(), 1);
+        json += ",\"u\":1}}";
+
+        // Operating State
+        {
+            const char* stateStr;
+            switch (state.getOperatingState())
+            {
+                case 2: stateStr = "IDLE"; break;
+                case 3: stateStr = "HEATING"; break;
+                case 6: stateStr = "PV_BOOST"; break;
+                default: stateStr = "UNKNOWN"; break;
+            }
+            json += ",{\"id\":"; json += eid++;
+            json += ",\"dv\":{\"id\":\"00Operating State\",\"v\":\"";
+            json += stateStr;
+            json += "\"}}";
+        }
+
+        // Active Setpoint
+        json += ",{\"id\":"; json += eid++;
+        json += ",\"dv\":{\"id\":\"00Active Setpoint\",\"v\":";
+        json += String(state.getActiveSetpoint(), 1);
+        json += ",\"u\":1}}";
+
+        // Heat Source
+        {
+            const char* hsStr;
+            switch (state.getHeatSource())
+            {
+                case 0: hsStr = "NONE"; break;
+                case 1: hsStr = "HEATPUMP"; break;
+                case 2: hsStr = "EXT_BOILER"; break;
+                case 3: hsStr = "EXT_SOLAR"; break;
+                default: hsStr = "UNKNOWN"; break;
+            }
+            json += ",{\"id\":"; json += eid++;
+            json += ",\"dv\":{\"id\":\"00Heat Source\",\"v\":\"";
+            json += hsStr;
+            json += "\"}}";
+        }
+
+        // Quick Heat Active
+        json += ",{\"id\":"; json += eid++;
+        json += ",\"dv\":{\"id\":\"00Quick Heat Active\",\"v\":\"";
+        json += state.isQuickHeatActive() ? "ON" : "OFF";
+        json += "\"}}";
+
+        // Force Heating
+        json += ",{\"id\":"; json += eid++;
+        json += ",\"dv\":{\"id\":\"00Force Heating\",\"v\":\"";
+        json += state.isForceHeating() ? "ON" : "OFF";
+        json += "\"}}";
+
+        // PV Active
+        json += ",{\"id\":"; json += eid++;
+        json += ",\"dv\":{\"id\":\"00PV Active\",\"v\":\"";
+        json += state.isPvActive() ? "ON" : "OFF";
+        json += "\"}}";
+
+        json += "]}";
+
+        // --- Device 2: Settings (id=2) ---
+        json += ",{\"id\":2,\"t\":5,\"n\":\"Settings\",\"nodes\":[";
+        eid = 200;
+
+        // DHW Setpoint (writable)
+        json += "{\"id\":"; json += eid++;
+        json += ",\"dv\":{\"id\":\"00DHW Setpoint\",\"v\":";
+        json += String(state.getDhwSetpoint(), 1);
+        json += ",\"u\":1,\"c\":\"dhwSetpoint\",\"m\":40,\"x\":65,\"s\":\"0.5\"}}";
+
+        // Eco Deviation (writable)
+        json += ",{\"id\":"; json += eid++;
+        json += ",\"dv\":{\"id\":\"00Eco Deviation\",\"v\":";
+        json += String(state.getEcoDeviation(), 1);
+        json += ",\"u\":1,\"c\":\"ecoDeviation\",\"m\":-10,\"x\":0,\"s\":\"0.5\"}}";
+
+        // Komfort Deviation (writable)
+        json += ",{\"id\":"; json += eid++;
+        json += ",\"dv\":{\"id\":\"00Komfort Deviation\",\"v\":";
+        json += String(state.getKomfortDeviation(), 1);
+        json += ",\"u\":1,\"c\":\"komfortDeviation\",\"m\":0,\"x\":10,\"s\":\"0.5\"}}";
+
+        // Program (writable select)
+        {
+            const char* progStr;
+            switch (state.getProgram())
+            {
+                case 0: progStr = "ECO"; break;
+                case 1: progStr = "KOMFORT"; break;
+                case 2: progStr = "BOOST"; break;
+                case 3: progStr = "AUTO"; break;
+                default: progStr = "UNKNOWN"; break;
+            }
+            json += ",{\"id\":"; json += eid++;
+            json += ",\"dv\":{\"id\":\"00Program\",\"v\":\"";
+            json += progStr;
+            json += "\",\"c\":\"program\",\"l\":[\"ECO\",\"KOMFORT\",\"BOOST\",\"AUTO\"]}}";
+        }
+
+        // Aux Heat Mode (writable select)
+        {
+            const char* auxStr;
+            switch (state.getAuxHeatMode())
+            {
+                case 0: auxStr = "OFF"; break;
+                case 1: auxStr = "ECO"; break;
+                case 2: auxStr = "SMART_GRID"; break;
+                default: auxStr = "UNKNOWN"; break;
+            }
+            json += ",{\"id\":"; json += eid++;
+            json += ",\"dv\":{\"id\":\"00Aux Heat Mode\",\"v\":\"";
+            json += auxStr;
+            json += "\",\"c\":\"auxHeatMode\",\"l\":[\"OFF\",\"ECO\",\"SMART_GRID\"]}}";
+        }
+
+        // External Input Function (writable select)
+        {
+            const char* extStr;
+            switch (state.getExtInputFunction())
+            {
+                case 0: extStr = "DISABLED"; break;
+                case 1: extStr = "PV_FUNCTION"; break;
+                case 2: extStr = "SG_READY"; break;
+                default: extStr = "UNKNOWN"; break;
+            }
+            json += ",{\"id\":"; json += eid++;
+            json += ",\"dv\":{\"id\":\"00External Input Function\",\"v\":\"";
+            json += extStr;
+            json += "\",\"c\":\"extInputFunction\",\"l\":[\"DISABLED\",\"PV_FUNCTION\",\"SG_READY\"]}}";
+        }
+
+        json += "]}";
+
+        // --- Device 3: Installer Parameters (id=3) ---
+        if (state.hasBlock(REG_INSTALLER_BLK1_START) || state.hasBlock(REG_INSTALLER_BLK2_START))
+        {
+            json += ",{\"id\":3,\"t\":5,\"n\":\"Installer\",\"nodes\":[";
+            eid = 300;
+            bool first = true;
+
+            if (state.hasBlock(REG_INSTALLER_BLK1_START))
+            {
+                // Frost Protection Temp
+                json += "{\"id\":"; json += eid++;
+                json += ",\"dv\":{\"id\":\"00Frost Protection Temp\",\"v\":";
+                json += String(state.getFrostProtectTemp(), 1);
+                json += ",\"u\":1,\"c\":\"frostProtectTemp\",\"m\":-10,\"x\":10,\"s\":\"0.5\"}}";
+
+                // Anti-Legionella Interval
+                json += ",{\"id\":"; json += eid++;
+                json += ",\"dv\":{\"id\":\"00Anti-Legionella Interval\",\"v\":";
+                json += state.getAntiLegioInterval();
+                json += ",\"u\":0,\"c\":\"antiLegioInterval\",\"m\":0,\"x\":90,\"s\":\"1\"}}";
+                first = false;
+            }
+
+            if (state.hasBlock(REG_INSTALLER_BLK2_START))
+            {
+                if (!first) json += ",";
+                // Bivalent Threshold
+                json += "{\"id\":"; json += eid++;
+                json += ",\"dv\":{\"id\":\"00Bivalent Threshold\",\"v\":";
+                json += String(state.getBivalentThreshold(), 1);
+                json += ",\"u\":1,\"c\":\"bivalentThreshold\",\"m\":-20,\"x\":20,\"s\":\"0.5\"}}";
+
+                // PV Target Setpoint
+                json += ",{\"id\":"; json += eid++;
+                json += ",\"dv\":{\"id\":\"00PV Target Setpoint\",\"v\":";
+                json += String(state.getPvTargetSetpoint(), 1);
+                json += ",\"u\":1,\"c\":\"pvTargetSetpoint\",\"m\":40,\"x\":70,\"s\":\"0.5\"}}";
+
+                // External Source Max Temp
+                json += ",{\"id\":"; json += eid++;
+                json += ",\"dv\":{\"id\":\"00External Source Max Temp\",\"v\":";
+                json += String(state.getExtSourceMaxTemp(), 1);
+                json += ",\"u\":1,\"c\":\"extSourceMaxTemp\",\"m\":20,\"x\":90,\"s\":\"0.5\"}}";
+
+                // External Source Priority
+                {
+                    const char* prioStr;
+                    switch (state.getExtSourcePriority())
+                    {
+                        case 0: prioStr = "DEVICE"; break;
+                        case 1: prioStr = "EXTERNAL"; break;
+                        default: prioStr = "UNKNOWN"; break;
+                    }
+                    json += ",{\"id\":"; json += eid++;
+                    json += ",\"dv\":{\"id\":\"00External Source Priority\",\"v\":\"";
+                    json += prioStr;
+                    json += "\",\"c\":\"extSourcePriority\",\"l\":[\"DEVICE\",\"EXTERNAL\"]}}";
+                }
+            }
+
+            json += "]}";
+        }
+
+        // --- Device 4: Diagnostics (id=4) ---
+        json += ",{\"id\":4,\"t\":5,\"n\":\"Diagnostics\",\"nodes\":[";
+        eid = 400;
+
+        json += "{\"id\":"; json += eid++;
+        json += ",\"dv\":{\"id\":\"00Uptime\",\"v\":";
+        json += (millis() / 1000);
+        json += ",\"u\":14}}";  // UOM 14 = SECONDS
+
+        json += ",{\"id\":"; json += eid++;
+        json += ",\"dv\":{\"id\":\"00Frames Received\",\"v\":";
+        json += modbusRelayTask.getFramesReceived();
+        json += "}}";
+
+        json += ",{\"id\":"; json += eid++;
+        json += ",\"dv\":{\"id\":\"00CRC Errors\",\"v\":";
+        json += modbusRelayTask.getCrcErrors();
+        json += "}}";
+
+        json += ",{\"id\":"; json += eid++;
+        json += ",\"dv\":{\"id\":\"00Writes Injected\",\"v\":";
+        json += modbusRelayTask.getWritesInjected();
+        json += "}}";
+
+        json += ",{\"id\":"; json += eid++;
+        json += ",\"dv\":{\"id\":\"00Free Heap\",\"v\":";
+        json += ESP.getFreeHeap();
+        json += ",\"u\":12}}";  // UOM 12 = KB
+
+        json += "]}";
+
+        json += "]}";
+        request->send(200, "application/json", json);
+    });
+
+    // Core data endpoint (device list)
+    mServer.on("/rest/coreData", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json",
+            "{\"connected\":true,\"devices\":[{\"id\":1,\"tn\":\"Heat Pump\",\"t\":5,\"b\":\"Atlantic\",\"n\":\"Optitronic 2\",\"d\":1,\"p\":1,\"v\":\"2.0\",\"e\":20}]}");
+    });
+
+    // Device data endpoint (entity list for a device)
+    mServer.on("/rest/deviceData", HTTP_GET, [](AsyncWebServerRequest* request) {
+        // Reuse dashboard data for now - clients will get the full tree
+        request->redirect("/rest/dashboardData");
+    });
+
+    // Write device value (from dashboard edit dialog)
+    auto* writeHandler = new AsyncCallbackJsonWebHandler("/rest/writeDeviceValue");
+    writeHandler->setMethod(HTTP_POST);
+    writeHandler->onRequest([](AsyncWebServerRequest* request, JsonVariant& json) {
+        using namespace aquamqtt::message::optitronic2;
+        JsonObject root = json.as<JsonObject>();
+        const char* cmd = root["c"] | "";
+        JsonVariant val = root["v"];
+
+        if (strlen(cmd) == 0)
+        {
+            request->send(400, "application/json", "{\"error\":\"command required\"}");
+            return;
+        }
+
+        // Map command names to register addresses and value encoding
+        uint16_t reg = 0;
+        uint16_t regVal = 0;
+
+        if (strcmp(cmd, "dhwSetpoint") == 0)
+        {
+            reg = REG_DHW_SETPOINT;
+            regVal = (uint16_t)(val.as<float>() * 10.0f);
+        }
+        else if (strcmp(cmd, "ecoDeviation") == 0)
+        {
+            reg = REG_ECO_DEVIATION;
+            regVal = (uint16_t)((int16_t)(val.as<float>() * 10.0f));
+        }
+        else if (strcmp(cmd, "komfortDeviation") == 0)
+        {
+            reg = REG_KOMFORT_DEVIATION;
+            regVal = (uint16_t)((int16_t)(val.as<float>() * 10.0f));
+        }
+        else if (strcmp(cmd, "program") == 0)
+        {
+            reg = REG_PROGRAM;
+            String sv = val.as<String>();
+            if (sv == "ECO") regVal = 0;
+            else if (sv == "KOMFORT") regVal = 1;
+            else if (sv == "BOOST") regVal = 2;
+            else if (sv == "AUTO") regVal = 3;
+        }
+        else if (strcmp(cmd, "auxHeatMode") == 0)
+        {
+            reg = REG_AUX_HEAT_MODE;
+            String sv = val.as<String>();
+            if (sv == "OFF") regVal = 0;
+            else if (sv == "ECO") regVal = 1;
+            else if (sv == "SMART_GRID") regVal = 2;
+        }
+        else if (strcmp(cmd, "extInputFunction") == 0)
+        {
+            reg = REG_EXT_INPUT_FUNCTION;
+            String sv = val.as<String>();
+            if (sv == "DISABLED") regVal = 0;
+            else if (sv == "PV_FUNCTION") regVal = 1;
+            else if (sv == "SG_READY") regVal = 2;
+        }
+        else if (strcmp(cmd, "frostProtectTemp") == 0)
+        {
+            reg = REG_FROST_PROTECT_TEMP;
+            regVal = (uint16_t)((int16_t)(val.as<float>() * 10.0f));
+        }
+        else if (strcmp(cmd, "antiLegioInterval") == 0)
+        {
+            reg = REG_ANTI_LEGIO_INTERVAL;
+            regVal = val.as<uint16_t>();
+        }
+        else if (strcmp(cmd, "bivalentThreshold") == 0)
+        {
+            reg = REG_BIVALENT_THRESHOLD;
+            regVal = (uint16_t)((int16_t)(val.as<float>() * 10.0f));
+        }
+        else if (strcmp(cmd, "pvTargetSetpoint") == 0)
+        {
+            reg = REG_PV_TARGET_SETPOINT;
+            regVal = (uint16_t)(val.as<float>() * 10.0f);
+        }
+        else if (strcmp(cmd, "extSourceMaxTemp") == 0)
+        {
+            reg = REG_EXT_SOURCE_MAX_TEMP;
+            regVal = (uint16_t)(val.as<float>() * 10.0f);
+        }
+        else if (strcmp(cmd, "extSourcePriority") == 0)
+        {
+            reg = REG_EXT_SOURCE_PRIORITY;
+            String sv = val.as<String>();
+            if (sv == "DEVICE") regVal = 0;
+            else if (sv == "EXTERNAL") regVal = 1;
+        }
+        else
+        {
+            request->send(400, "application/json", "{\"error\":\"unknown command\"}");
+            return;
+        }
+
+        if (reg != 0)
+        {
+            optitronic2MqttTask.queueWrite(reg, regVal);
+            request->send(200, "application/json", "{\"status\":\"ok\"}");
+        }
+        else
+        {
+            request->send(400, "application/json", "{\"error\":\"invalid register\"}");
+        }
+    });
+    mServer.addHandler(writeHandler);
 
     // POST API: WiFi config
     auto* wifiHandler = new AsyncCallbackJsonWebHandler("/api/wifi");
@@ -358,6 +751,17 @@ void WebHandler::handleRoot(AsyncWebServerRequest* request)
 
 void WebHandler::handleNotFound(AsyncWebServerRequest* request)
 {
+    // SPA fallback: serve index.html for non-API routes (client-side routing)
+    String uri = request->url();
+    if (!uri.startsWith("/api/") && !uri.startsWith("/rest/") && !uri.startsWith("/assets/")
+        && !uri.startsWith("/css/") && !uri.startsWith("/fonts/") && !uri.startsWith("/app/"))
+    {
+        if (LittleFS.exists("/index.html"))
+        {
+            request->send(LittleFS, "/index.html", "text/html");
+            return;
+        }
+    }
     request->send(404, "text/plain", "Not Found");
 }
 
